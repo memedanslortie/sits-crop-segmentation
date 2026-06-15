@@ -4,10 +4,19 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "datasets>=5.0.0",
+    "huggingface-hub>=1.19.0",
+    "requests>=2.34.2",
+]
 
 [tool.uv.workspace]
 members = [
     "V_JEPA",
     "TimeSformer",
+]
+
+[dependency-groups]
+dev = [
+    "torch>=2.12.0",
 ]
