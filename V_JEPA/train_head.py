@@ -204,12 +204,12 @@ def train(cfg: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
     """
     from utils.load_data import get_pastis_dataloaders
 
-    num_classes: int = cfg.get("training", {}).get("num_classes", 20)
+    num_classes: int = int(cfg.get("training", {}).get("num_classes", 20))
     noloss_classes: set[int] = set(cfg["data"]["noloss_classes"])
 
     torch.manual_seed(cfg["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    evaluator = SITS_Evaluator(num_classes=num_classes, ignore_indices=list(noloss_classes))
+    evaluator = SITS_Evaluator(num_classes=num_classes, ignore_indices=list(noloss_classes), device=device)
 
     train_loader, val_loader, _ = get_pastis_dataloaders(
         data_path=cfg["data"]["dataset_path"],
