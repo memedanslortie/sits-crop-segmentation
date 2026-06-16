@@ -63,14 +63,10 @@ def apply_training_strategy(model, config):
  
         # Inject trainable low-rank matrices into the Attention blocks
         lora_config = LoraConfig(
-            r=8, lora_alpha=16, target_modules=["query", "value"],
+            r=8, lora_alpha=16, target_modules=["attention.attention.qkv", "temporal_attention.attention.qkv"],
             lora_dropout=0.1, bias="none"
         )
 
-        print("--- Structure du modèle pour LoRA ---")
-        for name, module in model.backbone.named_modules():
-            if "query" in name or "attention" in name:
-                print(name)
         model.backbone = get_peft_model(model.backbone, lora_config)
         
  
