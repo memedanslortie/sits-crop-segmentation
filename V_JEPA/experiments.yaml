@@ -1,14 +1,24 @@
 default: {}
 
 dataset_scaling:
-  dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
+  ablation.dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
 
 cloud_ablation:
-  cloud_drop_rate: [0.0, 0.2, 0.5]
+  ablation.cloud_drop_rate: [0.0, 0.5, 1.0]
 
 adaptation_comparison:
-  model.adaptation: [linear_probe, lora]
+  training.lora:
+    - rank: 8
+      alpha: 16.0
+      lr: 2.0e-4
+      merge_after_training: false
+    - null
 
 adaptation_vs_data:
-  dataset_fraction: [0.01, 0.1, 1.0]
-  model.adaptation: [linear_probe, lora]
+  ablation.dataset_fraction: [0.01, 0.1, 1.0]
+  training.lora:
+    - rank: 8
+      alpha: 16.0
+      lr: 2.0e-4
+      merge_after_training: false
+    - null

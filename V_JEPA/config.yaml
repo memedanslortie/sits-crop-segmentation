@@ -3,10 +3,9 @@ run_fold: 1
 
 data:
   dataset_path: "/kaggle/input/pastis-dataset"
-  noloss_classes: [19]   # void / unknown-crop class in PASTIS
+  noloss_classes: [19]
   to_rgb: true
 
-# Ablation knobs (passed straight to get_pastis_dataloaders)
 ablation:
   dataset_fraction: 1.0
   cloud_drop_rate: 0.0
@@ -15,19 +14,12 @@ model:
   backbone: vjepa2_1_vit_base_384
 
 training:
-  num_classes: 20          # 18 crop classes + background + void (19 masked at loss)
+  num_classes: 20
   epochs: 100
   batch_size: 16
-
-  # vjepa2_1_vit_base_384 was pretrained at 384×384; each PASTIS frame is
-  # resized to this before encoding. Patch size = 16 → 24×24 = 576 tokens.
   img_size: 384
-
-  hidden_dim: 512          # MLP inner dim between LayerNorm→Linear→GELU→Linear
-
+  hidden_dim: 512
   lr: 1.0e-3
   weight_decay: 1.0e-4
-
-  lr_patience: 10          # epochs without val-loss improvement before ×0.5
-
+  lr_patience: 10
   checkpoint_dir: "./checkpoints"
