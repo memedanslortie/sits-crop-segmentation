@@ -191,11 +191,11 @@ def _one_epoch(
 
     return out
 
-def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # noqa: ARG001
+def train(cfg: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # noqa: ARG001
     """Train a segmentation head on V-JEPA 2.1 features for PASTIS.
 
     Args:
-        cgf      : parsed config dict.
+        cfg      : parsed config dict.
         encoder  : V-JEPA 2.1 ViT encoder.
         predictor: unused (V-JEPA pretraining artifact).
 
@@ -204,22 +204,25 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
     """
     from utils.load_data import get_pastis_dataloaders
 
-    torch.manual_seed(cgf["seed"])
+    num_classes: int = cfg.get("training", {}).get("num_classes", 20)
+    noloss_classes: set[int] = set(cfg["data"]["noloss_classes"])
+
+    torch.manual_seed(cfg["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     evaluator = SITS_Evaluator(num_classes=num_classes, ignore_indices=list(noloss_classes))
 
     train_loader, val_loader, _ = get_pastis_dataloaders(
-        data_path=cgf["data"]["dataset_path"],
-        batch_size=cgf["training"]["batch_size"],
-        run_fold=cgf["run_fold"],
-        fraction=cgf["ablation"]["dataset_fraction"],
-        cloud_rate=cgf["ablation"]["cloud_drop_rate"],
-        to_rgb=cgf["data"]["to_rgb"],
+        data_path=cfg["data"]["dataset_path"],
+        batch_size=cfg["training"]["batch_size"],
+        run_fold=cfg["run_fold"],
+        fraction=cfg["ablation"]["dataset_fraction"],
+        cloud_rate=cfg["ablation"]["cloud_drop_rate"],
+        to_rgb=cfg["data"]["to_rgb"],
     )
 
     # Encoder
     encoder = encoder.to(device)
-    lora_cfg: dict | None = cgf["training"].get("lora")
+    lora_cfg: dict | None = cfg["training"].get("lora")
     lora_active = lora_cfg is not None
 
     if lora_active:
@@ -230,28 +233,26 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
         encoder.eval()
 
     # Head
-    img_size: int = cgf["training"].get("img_size", 384)
-    num_classes: int = cgf["training"]["num_classes"]
+    img_size: int = cfg["training"].get("img_size", 384)
     with torch.no_grad():
         embed_dim = encoder(torch.zeros(1, 3, img_size, img_size, device=device)).shape[-1]
 
     head = SegHead(
         embed_dim=embed_dim,
         num_classes=num_classes,
-        hidden_dim=cgf["training"].get("hidden_dim", 512),
+        hidden_dim=cfg["training"].get("hidden_dim", 512),
         patch_grid=_patch_grid(encoder, img_size),
     ).to(device)
     pool = TemporalMeanPool()
 
     # Loss
-    noloss_classes: set[int] = set(cgf["data"]["noloss_classes"])   # {19}
     void_mask_t = torch.tensor(sorted(noloss_classes), device=device)
 
     class_weight: torch.Tensor | None = None
-    if cgf["training"].get("class_weighting", False):
-        ckpt_dir = Path(cgf["training"].get("checkpoint_dir", "./checkpoints"))
+    if cfg["training"].get("class_weighting", False):
+        ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        cache = ckpt_dir / f"class_weights_fold{cgf['run_fold']}.pt"
+        cache = ckpt_dir / f"class_weights_fold{cfg['run_fold']}.pt"
         class_weight = _compute_class_weights(
             train_loader.dataset, num_classes, noloss_classes, cache, device
         )
@@ -261,26 +262,26 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
     criterion = nn.CrossEntropyLoss(weight=class_weight, ignore_index=-1)
 
     # Optimiser
-    param_groups = [{"params": head.parameters(), "lr": cgf["training"]["lr"]}]
+    param_groups = [{"params": head.parameters(), "lr": cfg["training"]["lr"]}]
     if lora_active:
-        lora_lr = lora_cfg.get("lr", cgf["training"]["lr"])
+        lora_lr = lora_cfg.get("lr", cfg["training"]["lr"])
         param_groups.append({"params": [p for p in encoder.parameters() if p.requires_grad], "lr": lora_lr})
 
-    optimizer = torch.optim.AdamW(param_groups, weight_decay=cgf["training"].get("weight_decay", 1e-4))
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=cfg["training"].get("weight_decay", 1e-4))
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=cgf["training"].get("lr_patience", 10), factor=0.5,
+        optimizer, mode="min", patience=cfg["training"].get("lr_patience", 10), factor=0.5,
     )
     scaler = GradScaler()
 
     # Checkpointing
-    ckpt_dir = Path(cgf["training"].get("checkpoint_dir", "./checkpoints"))
+    ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     suffix    = "lora" if lora_active else "frozen"
-    best_ckpt = ckpt_dir / f"best_{suffix}_fold{cgf['run_fold']}.pt"
+    best_ckpt = ckpt_dir / f"best_{suffix}_fold{cfg['run_fold']}.pt"
     best_val_loss = float("inf")
 
     # Loop
-    n_epochs: int = cgf["training"]["epochs"]
+    n_epochs: int = cfg["training"]["epochs"]
     for epoch in range(1, n_epochs + 1):
         t0 = time.perf_counter()
         train_m = _one_epoch(
@@ -305,7 +306,7 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
         scheduler.step(val_m["loss"])
 
         print(
-            f"[Fold {cgf['run_fold']} | {epoch:03d}/{n_epochs}]  "
+            f"[Fold {cfg['run_fold']} | {epoch:03d}/{n_epochs}]  "
             f"train loss={train_m['loss']:.4f} | "
             f"val loss={val_m['loss']:.4f} | "
             f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
