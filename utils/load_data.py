@@ -96,7 +96,7 @@ class PASTISDataset(Dataset):
             x = x[: self.max_seq_len]
             mask = cloud_mask[: self.max_seq_len]
 
-        # x: [max_seq_len, 10, 128, 128], y: [128, 128], mask: [max_seq_len]
+        # x: [max_seq_len, 3 if to_rgb else 10, 128, 128], y: [128, 128], mask: [max_seq_len]
         return x, y, mask
 
 
@@ -122,9 +122,9 @@ def get_pastis_dataloaders(
 
     print(f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} ---")
 
-    train_dataset = PASTISDataset(data_path, train_folds, dataset_fraction=fraction, cloud_drop_rate=cloud_rate)
-    val_dataset = PASTISDataset(data_path, [val_fold], dataset_fraction=1.0, cloud_drop_rate=0.0)
-    test_dataset = PASTISDataset(data_path, [test_fold], dataset_fraction=1.0, cloud_drop_rate=cloud_rate)
+    train_dataset = PASTISDataset(data_path, train_folds, dataset_fraction=fraction, cloud_drop_rate=cloud_rate, to_rgb=to_rgb)
+    val_dataset = PASTISDataset(data_path, [val_fold], dataset_fraction=1.0, cloud_drop_rate=0.0, to_rgb=to_rgb)
+    test_dataset = PASTISDataset(data_path, [test_fold], dataset_fraction=1.0, cloud_drop_rate=cloud_rate, to_rgb=to_rgb)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
