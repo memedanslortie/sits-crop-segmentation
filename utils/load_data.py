@@ -62,6 +62,17 @@ class PASTISDataset(Dataset):
     def __len__(self) -> int:
         return len(self.patch_ids)
 
+    def label_counts(self, num_classes: int) -> torch.Tensor:
+        """Pixel count per class over this split. Reads ONLY the small TARGET files
+        (not the heavy S2 time series), so it is cheap to call once before training."""
+        counts = torch.zeros(num_classes, dtype=torch.float64)
+        for pid in self.patch_ids:
+            y = np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{pid}.npy")[0]
+            counts += torch.bincount(
+                torch.from_numpy(y).long().flatten(), minlength=num_classes
+            ).double()
+        return counts
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         patch_id = self.patch_ids[idx]
 

@@ -11,7 +11,7 @@ data:
   max_seq_len: 60
   in_channels: 10
   num_classes: 20
-  ignore_classes: [0, 19]
+  ignore_classes: [19]           # U-TAE protocol: score background(0)+18 crops, ignore ONLY void(19)
 
 ablation:
   dataset_fraction: 1.0
@@ -24,6 +24,7 @@ training:
   weight_decay: 0.05
   gradient_clipping: 1.0
   loss_function: "dice_ce"
+  class_weighting: true           # median-frequency balancing so background(0) doesn't dominate the loss
 
 model:
   backbone: "facebook/timesformer-base-finetuned-k400"

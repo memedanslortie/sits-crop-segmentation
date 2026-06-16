@@ -112,17 +112,39 @@ def apply_training_strategy(model, config):
 # ==========================================
 # 3. LOSS FUNCTIONS
 # ==========================================
+def compute_class_weights(counts, ignore_indices, num_classes, device, max_weight=10.0):
+    """Median-frequency balancing (Eigen & Fergus, 2015) over the SCORED classes.
+
+    w_c = median(freq) / freq_c  → frequent classes (e.g. background) get w<1, rare crops
+    get w>1. Capped at `max_weight` so ultra-rare classes (e.g. Soybeans) can't destabilise
+    training. Ignored classes (void) receive weight 0. Returns a [num_classes] tensor.
+    """
+    counts = counts.double()
+    scored = [c for c in range(num_classes) if c not in ignore_indices]
+    scored_counts = counts[scored]
+    freq = scored_counts / scored_counts.sum().clamp(min=1)
+    nonzero = freq[freq > 0]
+    med = torch.median(nonzero) if len(nonzero) > 0 else torch.tensor(1.0, dtype=torch.float64)
+    weights = torch.zeros(num_classes, dtype=torch.float32)
+    for c, f in zip(scored, freq):
+        if f > 0:
+            weights[c] = float((med / f).clamp(max=max_weight))
+    return weights.to(device)
+
+
 class SITS_LossBuilder(nn.Module):
-    def __init__(self, loss_type="ce", ignore_indices=None):
+    def __init__(self, loss_type="ce", ignore_indices=None, class_weights=None):
         """
         Unified loss builder controlled by TimeSformer/configs/base.yaml.
         Supported types: 'ce' | 'focal' | 'dice_ce'
+        `class_weights`: optional [num_classes] tensor for class-balanced CE.
         """
         super().__init__()
         if ignore_indices is None:
-            ignore_indices = [0, 19]
+            ignore_indices = [19]
         self.loss_type = loss_type
         self.ignore_indices = ignore_indices
+        self.class_weights = class_weights
 
     def forward(self, logits, targets):
         valid_mask = ~torch.isin(
@@ -133,7 +155,7 @@ class SITS_LossBuilder(nn.Module):
         if not valid_mask.any():
             return torch.tensor(0.0, device=targets.device, requires_grad=True)
 
-        ce_loss = F.cross_entropy(logits, targets, reduction='none')
+        ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights, reduction='none')
 
         if self.loss_type == "ce":
             return ce_loss[valid_mask].mean()
@@ -215,9 +237,19 @@ def main():
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
     )
 
+    class_weights = None
+    if config['training'].get('class_weighting', False):
+        print("Computing median-frequency class weights from the training set...")
+        counts = train_loader.dataset.label_counts(config['data']['num_classes'])
+        class_weights = compute_class_weights(
+            counts, config['data']['ignore_classes'], config['data']['num_classes'], device
+        )
+        print(f"   ↳ Class weights: {[round(w, 3) for w in class_weights.tolist()]}")
+
     criterion = SITS_LossBuilder(
         loss_type=config['training']['loss_function'],
-        ignore_indices=config['data']['ignore_classes']
+        ignore_indices=config['data']['ignore_classes'],
+        class_weights=class_weights
     )
     evaluator = SITS_Evaluator(
         num_classes=config['data']['num_classes'],

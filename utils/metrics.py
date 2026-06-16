@@ -31,7 +31,7 @@ PASTIS_CLASSES = {
 class SITS_Evaluator:
     def __init__(self, num_classes=20, ignore_indices=None):
         if ignore_indices is None:
-            ignore_indices = [0, 19]
+            ignore_indices = [19]  # U-TAE protocol: ignore ONLY void; background(0) is scored
         self.num_classes = num_classes
         self.ignore_indices = ignore_indices
         self.reset()
