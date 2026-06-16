@@ -11,7 +11,6 @@ def load_yaml(path: str | Path) -> dict:
 
 def set_nested(cfg: dict, path: str, value) -> None:
     node = cfg
-
     keys = path.split(".")
 
     for key in keys[:-1]:
@@ -36,7 +35,7 @@ def flatten(d: dict, prefix: str = "") -> dict[str, object]:
 class Experiment:
     name: str
     group: str
-    config: dict[str, Any]
+    config: dict
 
 def build_experiments(
     config_path: str = "config.yaml",
@@ -46,29 +45,24 @@ def build_experiments(
     base_cfg = load_yaml(config_path)
     spec = load_yaml(experiments_path)
 
-    defaults = flatten(spec["defaults"])
-
     experiments: list[Experiment] = []
 
-    for group_name, group in spec["groups"].items():
+    for group_name, group in spec.items():
 
-        paths = list(group.keys())
-        value_lists = [group[p] for p in paths]
+        keys = list(group.keys())
+        values_list = [group[k] for k in keys]
 
-        for values in product(*value_lists):
+        for combo in product(*values_list):
 
             cfg = deepcopy(base_cfg)
 
-            for path, value in defaults.items():
-                set_nested(cfg, path, value)
-
             parts = []
 
-            for path, value in zip(paths, values):
-                set_nested(cfg, path, value)
+            for k, v in zip(keys, combo):
+                set_nested(cfg, k, v)
 
-                short_name = path.split(".")[-1]
-                parts.append(f"{short_name}={value}")
+                short = k.split(".")[-1]
+                parts.append(f"{short}={v}")
 
             experiments.append(
                 Experiment(

@@ -1,0 +1,12 @@
+dataset_scaling:
+  dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
+
+cloud_ablation:
+  cloud_drop_rate: [0.0, 0.2, 0.5]
+
+adaptation_comparison:
+  model.adaptation: [linear_probe, lora]
+
+adaptation_vs_data:
+  dataset_fraction: [0.01, 0.1, 1.0]
+  model.adaptation: [linear_probe, lora]
