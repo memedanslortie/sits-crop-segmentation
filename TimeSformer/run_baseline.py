@@ -14,7 +14,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.load_data import get_pastis_dataloaders
 from utils.metrics import SITS_Evaluator
-from TimeSformer.timesformer_sits import SITS_TimeSformer
+from timesformer_sits import SITS_TimeSformer
 
 # DETERMINISM
 def set_seed(seed=42):
@@ -26,7 +26,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def load_config(config_path="configs/base.yaml"):
+def load_config(config_path="TimeSformer/configs/base.yaml"):
     """Loads YAML config and overrides run_fold if passed via CLI."""
     parser = argparse.ArgumentParser(description="Run SITS-TimeSformer Baseline")
     parser.add_argument("--fold", type=int, default=None, help="Force the execution of a specific fold")
@@ -92,7 +92,7 @@ def apply_training_strategy(model, config):
 class SITS_LossBuilder(nn.Module):
     def __init__(self, loss_type="ce", ignore_indices=None):
         """
-        Unified loss builder controlled by configs/base.yaml.
+        Unified loss builder controlled by TimeSformer/configs/base.yaml.
         Supported types: 'ce' | 'focal' | 'dice_ce'
         """
         super().__init__()

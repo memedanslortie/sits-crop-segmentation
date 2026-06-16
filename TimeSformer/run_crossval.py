@@ -7,7 +7,7 @@ import yaml
 def main():
     print("STARTING 5-FOLD CROSS-VALIDATION ")
     
-    config_path = "configs/base.yaml"
+    config_path = "TimeSformer/configs/base.yaml"
     
     # Read the config exactly ONCE to safely extract the experiment name
     with open(config_path, "r") as f:
