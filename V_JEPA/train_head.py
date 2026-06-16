@@ -209,7 +209,7 @@ def train(cfg: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:
         max_seq_len, in_channels, _, _ = sample_x.shape
         
         # Pass dummy 5D video to infer correct token grid
-        dummy_input = torch.zeros(1, in_channels, max_seq_len, img_size, img_size, device=device)
+        dummy_input = torch.zeros(30, in_channels, max_seq_len, img_size, img_size, device=device)
         dummy_out = encoder(dummy_input)
         
         embed_dim = dummy_out.shape[-1]
