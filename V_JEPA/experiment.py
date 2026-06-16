@@ -1,30 +1,36 @@
+import yaml
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from itertools import product
+from pathlib import Path
+
+def load_yaml(path: str | Path) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f)
 
 
-def set_nested(cfg: dict, path: str, value):
-    keys = path.split(".")
+def set_nested(cfg: dict, path: str, value) -> None:
     node = cfg
+
+    keys = path.split(".")
 
     for key in keys[:-1]:
         node = node.setdefault(key, {})
 
     node[keys[-1]] = value
 
-def flatten(d, prefix=""):
-    result = {}
+def flatten(d: dict, prefix: str = "") -> dict[str, object]:
+    out = {}
 
     for k, v in d.items():
-        path = f"{prefix}.{k}" if prefix else k
+        key = f"{prefix}.{k}" if prefix else k
 
         if isinstance(v, dict):
-            result.update(flatten(v, path))
+            out.update(flatten(v, key))
         else:
-            result[path] = v
+            out[key] = v
 
-    return result
-
+    return out
 
 @dataclass(slots=True)
 class Experiment:
@@ -32,44 +38,44 @@ class Experiment:
     group: str
     config: dict[str, Any]
 
-import yaml
-from copy import deepcopy
-
-
 def build_experiments(
-    base_config: dict,
-    experiment_file: str,
+    config_path: str = "config.yaml",
+    experiments_path: str = "experiments.yaml",
 ) -> list[Experiment]:
 
-    spec = yaml.safe_load(open(experiment_file))
+    base_cfg = load_yaml(config_path)
+    spec = load_yaml(experiments_path)
 
-    defaults = spec["defaults"]
-    groups = spec["groups"]
+    defaults = flatten(spec["defaults"])
 
-    experiments = []
+    experiments: list[Experiment] = []
 
-    for group_name, variations in groups.items():
+    for group_name, group in spec["groups"].items():
 
-        for path, values in variations.items():
+        paths = list(group.keys())
+        value_lists = [group[p] for p in paths]
 
-            if not isinstance(values, list):
-                values = [values]
+        for values in product(*value_lists):
 
-            for value in values:
+            cfg = deepcopy(base_cfg)
 
-                cfg = deepcopy(base_config)
-
-                for default_path, default_value in flatten(defaults).items():
-                    set_nested(cfg, default_path, default_value)
-
+            for path, value in defaults.items():
                 set_nested(cfg, path, value)
 
-                experiments.append(
-                    Experiment(
-                        name=f"{group_name}_{value}",
-                        group=group_name,
-                        config=cfg,
-                    )
+            parts = []
+
+            for path, value in zip(paths, values):
+                set_nested(cfg, path, value)
+
+                short_name = path.split(".")[-1]
+                parts.append(f"{short_name}={value}")
+
+            experiments.append(
+                Experiment(
+                    name=f"{group_name}__{'__'.join(parts)}",
+                    group=group_name,
+                    config=cfg,
                 )
+            )
 
     return experiments
