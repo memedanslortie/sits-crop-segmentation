@@ -1,0 +1,30 @@
+
+experiment:
+  name: "TimeSformer_CHAMPION_LORA"
+  seed: 42
+  run_fold: 1             
+
+data:
+  dataset_path: "/kaggle/input/pastis-dataset"
+  max_seq_len: 60
+  in_channels: 10                
+  num_classes: 20                
+  ignore_classes: [0, 19]        
+
+ablation:
+  dataset_fraction: 1.0        
+  cloud_drop_rate: 0.0           
+
+training:
+  batch_size: 8                
+  num_epochs: 50
+  learning_rate: 0.0005         
+  weight_decay: 0.05
+  gradient_clipping: 1.0         
+  loss_function: "dice_ce"       #
+
+model:
+  backbone: "facebook/timesformer-base-finetuned-k400"
+  
+  use_lora: true              
+  freeze_backbone: false
