@@ -1,4 +1,10 @@
-# config.yaml
+seed: 42
+run_fold: 1
+
+data:
+  dataset_path: "/kaggle/input/pastis-dataset"
+  noloss_classes: [19]
+  to_rgb: True
 
 dataset_fraction: 1.0
 cloud_drop_rate: 0.0
