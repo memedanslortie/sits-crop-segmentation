@@ -19,11 +19,13 @@ class PASTISDataset(Dataset):
         seed: int = 42,
         cloud_drop_rate: float = 0.0,
         norm: bool = True,
+        to_rgb: bool = False,
     ):
         self.data_path = Path(data_path)
         self.max_seq_len = max_seq_len
         self.cloud_drop_rate = cloud_drop_rate
         self.norm = norm
+        self.to_rgb = to_rgb
 
         metadata_path = self.data_path / "metadata.geojson"
         with open(metadata_path) as f:
@@ -69,6 +71,10 @@ class PASTISDataset(Dataset):
         if self.norm:
             x = (x - self.mean) / self.std
 
+        if self.to_rgb:
+            # Sentinel-2 RGB = B4, B3, B2
+            x = x[:, [3, 2, 1], :, :]
+
         y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
 
         valid_seq_len = x.shape[0]
@@ -101,6 +107,7 @@ def get_pastis_dataloaders(
     run_fold: int = 1,
     fraction: float = 1.0,
     cloud_rate: float = 0.0,
+    to_rgb: bool = False,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Build train/val/test loaders following the PASTIS 5-fold cross-validation protocol.
 
