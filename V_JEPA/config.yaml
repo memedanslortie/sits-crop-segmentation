@@ -22,4 +22,5 @@ training:
   lr: 1.0e-3
   weight_decay: 1.0e-4
   lr_patience: 10
-  checkpoint_dir: "./checkpoints"
+  checkpoint_dir: "../data/checkpoints/vjepa"
+  class_weighting: true

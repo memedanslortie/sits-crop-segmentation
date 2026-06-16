@@ -9,7 +9,7 @@ Architecture:
 
 PASTIS label conventions (from dataset doc):
   - 0          : Background (non-agricultural land — valid class, included in loss)
-  - 1–18       : Crop types
+  - 1-18       : Crop types
   - 19         : Void (out-of-scope parcels — excluded from loss AND metrics)
 
 Class weighting (training.class_weighting: true):
