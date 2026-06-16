@@ -213,7 +213,8 @@ def main():
     # --- Model Initialization ---
     model = SITS_TimeSformer(
         in_channels=config['data']['in_channels'],
-        num_classes=config['data']['num_classes']
+        num_classes=config['data']['num_classes'],
+        high_res_decoder=config['model'].get('high_res_decoder', False)
     )
     model = apply_training_strategy(model, config)
 
@@ -352,7 +353,8 @@ def main():
     # Rebuild architecture first (critical for LoRA: layers must exist before loading weights)
     model = SITS_TimeSformer(
         in_channels=config['data']['in_channels'],
-        num_classes=config['data']['num_classes']
+        num_classes=config['data']['num_classes'],
+        high_res_decoder=config['model'].get('high_res_decoder', False)
     )
     model = apply_training_strategy(model, config)
     model.load_state_dict(torch.load(

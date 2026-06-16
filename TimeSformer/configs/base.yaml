@@ -1,5 +1,5 @@
 experiment:
-  name: "TimeSformer_CHAMPION_LORA"
+  name: "TimeSformer_HIRES_LORA"     # distinct name so it does NOT overwrite your TEST1 baseline
   seed: 42
   run_fold: 1
 
@@ -30,3 +30,4 @@ model:
   backbone: "facebook/timesformer-base-finetuned-k400"
   use_lora: true
   freeze_backbone: false
+  high_res_decoder: true            # progressive decoder + raw-input skip (vs single x16 bilinear upsample)

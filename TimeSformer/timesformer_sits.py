@@ -32,13 +32,59 @@ class TemporalAggregator(nn.Module):
         )
         return self.norm(aggregated.squeeze(1))  # [B*H*W, C]
 
+
+class _UpBlock(nn.Module):
+    """x2 bilinear upsample + double conv (a U-Net-style decoder stage)."""
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1), nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1), nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.conv(self.up(x))
+
+
+class ProgressiveDecoder(nn.Module):
+    """Progressive learned upsampling (8->16->32->64->128) instead of a single x16 bilinear
+    jump, PLUS a high-resolution skip from the raw input image. The transformer provides the
+    SEMANTICS (at 8x8), the input skip restores the fine spatial DETAIL the patchifier threw
+    away — this is what sharpens parcel boundaries (cf. SETR-PUP / DPT)."""
+    def __init__(self, hidden_dim, num_classes, in_channels, patch_size=16):
+        super().__init__()
+        n_up = patch_size.bit_length() - 1  # power-of-2 patch: 16 -> 4 upsamples (8->128)
+        chans = [256, 128, 64, 32, 32, 32, 32][:n_up]
+        self.proj = nn.Conv2d(hidden_dim, 256, 1)
+        ups, prev = [], 256
+        for c in chans:
+            ups.append(_UpBlock(prev, c)); prev = c
+        self.ups = nn.ModuleList(ups)
+        # shallow stem on the (temporally-pooled) raw input -> full-res detail features
+        self.input_stem = nn.Sequential(
+            nn.Conv2d(in_channels, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+        )
+        self.head = nn.Conv2d(prev + 32, num_classes, 1)
+
+    def forward(self, feats, input_hr):
+        x = self.proj(feats)
+        for up in self.ups:
+            x = up(x)
+        skip = self.input_stem(input_hr)
+        return self.head(torch.cat([x, skip], dim=1))
+
+
 class SITS_TimeSformer(nn.Module):
-    def __init__(self, in_channels=10, num_classes=20, img_size=128, patch_size=16, intermediate_layers=(4, 8, 12)):
+    def __init__(self, in_channels=10, num_classes=20, img_size=128, patch_size=16,
+                 intermediate_layers=(4, 8, 12), high_res_decoder=False):
         super().__init__()
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_classes = num_classes
         self.intermediate_layers = intermediate_layers
+        self.high_res_decoder = high_res_decoder
         
         print("📥 Importing pre-trained TimeSformer (Kinetics-400) with Hidden States Extraction...")
         # 1. Load the pre-trained backbone
@@ -84,13 +130,17 @@ class SITS_TimeSformer(nn.Module):
         self.temporal_aggregator = TemporalAggregator(embed_dim=self.hidden_dim)
 
         # 5. Spatial Decoder
-        self.decoder = nn.Sequential(
-            nn.Conv2d(self.hidden_dim, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=patch_size, mode='bilinear', align_corners=False),
-            nn.Conv2d(256, num_classes, kernel_size=1)
-        )
+        if high_res_decoder:
+            print("🔬 Using high-resolution progressive decoder (+ raw-input skip)")
+            self.decoder = ProgressiveDecoder(self.hidden_dim, num_classes, in_channels, patch_size)
+        else:
+            self.decoder = nn.Sequential(
+                nn.Conv2d(self.hidden_dim, 256, kernel_size=3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(),
+                nn.Upsample(scale_factor=patch_size, mode='bilinear', align_corners=False),
+                nn.Conv2d(256, num_classes, kernel_size=1)
+            )
 
     def forward(self, x, padding_mask=None):
         B, T, C, H, W = x.shape
@@ -138,6 +188,16 @@ class SITS_TimeSformer(nn.Module):
         spatial_features = aggregated.view(B, grid_h, grid_w, self.hidden_dim).permute(0, 3, 1, 2)
         
         # Final Spatial Decoding
-        logits = self.decoder(spatial_features)
-        
+        if self.high_res_decoder:
+            # Temporally-pooled raw input (masked mean over valid frames) -> high-res skip.
+            if padding_mask is not None:
+                valid = (~padding_mask).float()
+                w = (valid / valid.sum(dim=1, keepdim=True).clamp(min=1.0)).to(x.dtype)
+                input_hr = torch.einsum('bt,btchw->bchw', w, x)
+            else:
+                input_hr = x.mean(dim=1)
+            logits = self.decoder(spatial_features, input_hr)
+        else:
+            logits = self.decoder(spatial_features)
+
         return logits
