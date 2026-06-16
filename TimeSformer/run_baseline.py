@@ -243,7 +243,8 @@ def main():
         print("Computing median-frequency class weights from the training set...")
         counts = train_loader.dataset.label_counts(config['data']['num_classes'])
         class_weights = compute_class_weights(
-            counts, config['data']['ignore_classes'], config['data']['num_classes'], device
+            counts, config['data']['ignore_classes'], config['data']['num_classes'], device,
+            max_weight=config['training'].get('class_weight_cap', 3.0)
         )
         print(f"   ↳ Class weights: {[round(w, 3) for w in class_weights.tolist()]}")
 
