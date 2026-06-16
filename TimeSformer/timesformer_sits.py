@@ -95,17 +95,13 @@ class SITS_TimeSformer(nn.Module):
     def forward(self, x, padding_mask=None):
         B, T, C, H, W = x.shape
 
-        # TimeSformer Attention Masking
-        hf_mask = None
-        if padding_mask is not None:
-            keep_mask = (~padding_mask).float() 
-            num_spatial_tokens = (H // self.patch_size) * (W // self.patch_size)
-            spatial_keep_mask = keep_mask.unsqueeze(-1).expand(-1, -1, num_spatial_tokens).reshape(B, -1)
-            cls_mask = torch.ones(B, 1, device=x.device)
-            hf_mask = torch.cat([cls_mask, spatial_keep_mask], dim=1)
-
-        # Feature extraction (CRUCIAL: output_hidden_states=True)
-        outputs = self.backbone(pixel_values=x, attention_mask=hf_mask, output_hidden_states=True)
+        # NOTE: HuggingFace's TimesformerModel.forward() does not accept an attention mask,
+        # so padding/cloud masking cannot be injected into the backbone's space-time
+        # attention (an earlier version passed `attention_mask=...` here — it was silently
+        # ignored). We therefore feed the full sequence to the backbone and enforce masking
+        # downstream in the TemporalAggregator, which is the layer that actually collapses
+        # the temporal axis: padded and cloudy frames are excluded there via key_padding_mask.
+        outputs = self.backbone(pixel_values=x, output_hidden_states=True)
         
         # --- CLAUDE'S MULTI-SCALE EXTRACTION ---
         # Extract layers (e.g., 4, 8, 12)

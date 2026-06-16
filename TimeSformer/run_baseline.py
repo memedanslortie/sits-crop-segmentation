@@ -74,6 +74,23 @@ def apply_training_strategy(model, config):
         )
         model.backbone = get_peft_model(model.backbone, lora_config)
 
+        # CRITICAL: get_peft_model() freezes EVERY non-adapter weight, including the
+        # input embeddings. Three input layers carry no usable pretrained signal for SITS
+        # and must be allowed to adapt, otherwise the LoRA adapters learn on top of a
+        # frozen, ill-initialised input — which is the true bottleneck of this transfer:
+        #   - patch_embeddings.projection : our 10-band conv, inflated from 3 RGB (crude init)
+        #   - position_embeddings         : randomly RE-INITIALISED (224px K400 -> 128px mismatch)
+        #   - time_embeddings             : 8-frame K400 table interpolated to 60 SITS frames
+        # We re-enable them AFTER get_peft_model so they train alongside the LoRA adapters.
+        unfrozen = []
+        for name, param in model.backbone.named_parameters():
+            if any(k in name for k in ("patch_embeddings.projection",
+                                       "position_embeddings",
+                                       "time_embeddings")):
+                param.requires_grad = True
+                unfrozen.append(name)
+        print(f"   ↳ Unfroze {len(unfrozen)} input-embedding tensors for domain adaptation.")
+
     elif config['model'].get('freeze_backbone', False):
         print("Strategy: Linear Probing (Frozen Backbone)")
         for param in model.backbone.parameters():
@@ -134,9 +151,16 @@ class SITS_LossBuilder(nn.Module):
                 .permute(0, 3, 1, 2)
                 .float()
             )
-            intersection = (probs * targets_onehot * valid_mask.unsqueeze(1)).sum(dim=(0, 2, 3))
-            union = ((probs + targets_onehot) * valid_mask.unsqueeze(1)).sum(dim=(0, 2, 3))
-            dice_loss = 1.0 - (2.0 * intersection / (union + 1e-6)).mean()
+            vm = valid_mask.unsqueeze(1)
+            intersection = (probs * targets_onehot * vm).sum(dim=(0, 2, 3))
+            union = ((probs + targets_onehot) * vm).sum(dim=(0, 2, 3))
+            dice_per_class = 2.0 * intersection / (union + 1e-6)
+            # Average Dice ONLY over scored classes. Ignored channels (background/void)
+            # never appear as valid targets, so their Dice is structurally ~0 and would
+            # otherwise inject a constant penalty that dilutes the gradient signal.
+            keep = torch.ones(logits.shape[1], dtype=torch.bool, device=logits.device)
+            keep[torch.tensor(self.ignore_indices, device=logits.device)] = False
+            dice_loss = 1.0 - dice_per_class[keep].mean()
             return 0.5 * ce_mean + 0.5 * dice_loss
 
         else:
