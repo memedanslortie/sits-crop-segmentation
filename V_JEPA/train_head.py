@@ -28,6 +28,8 @@ import torch.nn.functional as F
 from peft import LoraConfig, get_peft_model
 from torch.amp import GradScaler, autocast
 
+from utils.metrics import SITS_Evaluator
+
 class TemporalMeanPool(nn.Module):
     """Mean-pool patch tokens over valid (non-padded) timesteps.
 
@@ -145,15 +147,18 @@ def _one_epoch(
     criterion: nn.Module,
     device: torch.device,
     img_size: int,
-    void_mask_t: torch.Tensor,
     is_train: bool,
     lora_active: bool,
+    evaluator: SITS_Evaluator | None = None,
 ) -> dict[str, float]:
     head.train(is_train)
-    # With LoRA the encoder has trainable params → train mode during training.
     encoder.train(is_train and lora_active)
 
-    total_loss = total_correct = total_valid = n_batches = 0
+    if evaluator is not None:
+        evaluator.reset()
+
+    total_loss = 0.0
+    n_batches = 0
 
     for x, y, mask in loader:
         x, y, mask = x.to(device), y.to(device), mask.to(device)
@@ -161,9 +166,9 @@ def _one_epoch(
         with autocast("cuda"):
             enc_ctx = torch.enable_grad() if (is_train and lora_active) else torch.no_grad()
             with enc_ctx:
-                tokens = _encode_sits(encoder, x, img_size)     # (B, T, N, D)
-            logits = head(pool(tokens, mask))                    # (B, C, 128, 128)
+                tokens = _encode_sits(encoder, x, img_size)
 
+            logits = head(pool(tokens, mask))
             loss = criterion(logits, y).mean()
 
         if is_train:
@@ -172,14 +177,19 @@ def _one_epoch(
             scaler.step(optimizer)
             scaler.update()
 
-        non_void = ~torch.isin(y, void_mask_t)
-        preds = logits.argmax(1)
-        total_correct += ((preds == y) & non_void).sum().item()
-        total_valid   += non_void.sum().item()
-        total_loss    += loss.item()
-        n_batches     += 1
+        total_loss += loss.item()
+        n_batches += 1
 
-    return {"loss": total_loss / n_batches, "oa": total_correct / max(total_valid, 1)}
+        if evaluator is not None:
+            preds = logits.argmax(1)
+            evaluator.add_batch(preds, y)
+
+    out = {"loss": total_loss / max(n_batches, 1)}
+
+    if evaluator is not None:
+        out.update(evaluator.compute_metrics())
+
+    return out
 
 def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # noqa: ARG001
     """Train a segmentation head on V-JEPA 2.1 features for PASTIS.
@@ -196,6 +206,7 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
 
     torch.manual_seed(cgf["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    evaluator = SITS_Evaluator(num_classes=num_classes, ignore_indices=list(noloss_classes))
 
     train_loader, val_loader, _ = get_pastis_dataloaders(
         data_path=cgf["data"]["dataset_path"],
@@ -272,16 +283,34 @@ def train(cgf: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:  # 
     n_epochs: int = cgf["training"]["epochs"]
     for epoch in range(1, n_epochs + 1):
         t0 = time.perf_counter()
-        train_m = _one_epoch(encoder, head, pool, train_loader, optimizer, scaler, criterion,
-                             device, img_size, void_mask_t, is_train=True,  lora_active=lora_active)
-        val_m   = _one_epoch(encoder, head, pool, val_loader,   None,      scaler, criterion,
-                             device, img_size, void_mask_t, is_train=False, lora_active=lora_active)
+        train_m = _one_epoch(
+            encoder, head, pool,
+            train_loader,
+            optimizer, scaler, criterion,
+            device, img_size, void_mask_t,
+            is_train=True,
+            lora_active=lora_active,
+            evaluator=None,
+        )
+
+        val_m = _one_epoch(
+            encoder, head, pool,
+            val_loader,
+            None, scaler, criterion,
+            device, img_size, void_mask_t,
+            is_train=False,
+            lora_active=lora_active,
+            evaluator=evaluator,
+        )
         scheduler.step(val_m["loss"])
 
         print(
             f"[Fold {cgf['run_fold']} | {epoch:03d}/{n_epochs}]  "
-            f"train loss={train_m['loss']:.4f} oa={train_m['oa']:.4f}  |  "
-            f"val loss={val_m['loss']:.4f} oa={val_m['oa']:.4f}  "
+            f"train loss={train_m['loss']:.4f} | "
+            f"val loss={val_m['loss']:.4f} | "
+            f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
+            f"mIoU={val_m.get('mIoU', 0):.4f} | "
+            f"F1={val_m.get('Macro_F1', 0):.4f}  "
             f"({time.perf_counter() - t0:.1f}s)"
         )
 
