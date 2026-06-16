@@ -64,40 +64,48 @@ class PASTISDataset(Dataset):
     def __len__(self) -> int:
         return len(self.patch_ids)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        patch_id = self.patch_ids[idx]
+def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    patch_id = self.patch_ids[idx]
 
-        x = torch.from_numpy(np.load(self.data_path / "DATA_S2" / f"S2_{patch_id}.npy")).float()
-        if self.norm:
+    x = torch.from_numpy(np.load(self.data_path / "DATA_S2" / f"S2_{patch_id}.npy")).float()
+
+    # Apply RGB conversion FIRST (if enabled)
+    if self.to_rgb:
+        # Sentinel-2 RGB = B4, B3, B2 (indices 3, 2, 1)
+        x = x[:, [3, 2, 1], :, :]  # Now shape: (T, 3, H, W)
+
+    # Then normalize (using RGB-specific stats if to_rgb=True)
+    if self.norm:
+        if self.to_rgb:
+            # Select RGB channels from mean/std (shape: (1, 10, 1, 1) -> (1, 3, 1, 1))
+            rgb_mean = self.mean[:, [3, 2, 1], :, :]
+            rgb_std = self.std[:, [3, 2, 1], :, :]
+            x = (x - rgb_mean) / rgb_std
+        else:
             x = (x - self.mean) / self.std
 
-        if self.to_rgb:
-            # Sentinel-2 RGB = B4, B3, B2
-            x = x[:, [3, 2, 1], :, :]
+    y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
 
-        y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
+    valid_seq_len = x.shape[0]
+    cloud_mask = torch.zeros(valid_seq_len, dtype=torch.bool)
 
-        valid_seq_len = x.shape[0]
-        cloud_mask = torch.zeros(valid_seq_len, dtype=torch.bool)
+    if self.cloud_drop_rate > 0.0:
+        num_clouds = int(valid_seq_len * self.cloud_drop_rate)
+        if num_clouds > 0:
+            cloud_indices = torch.randperm(valid_seq_len)[:num_clouds]
+            x[cloud_indices] = 0.0
+            cloud_mask[cloud_indices] = True
 
-        if self.cloud_drop_rate > 0.0:
-            num_clouds = int(valid_seq_len * self.cloud_drop_rate)
-            if num_clouds > 0:
-                cloud_indices = torch.randperm(valid_seq_len)[:num_clouds]
-                x[cloud_indices] = 0.0
-                cloud_mask[cloud_indices] = True
+    # Pad or truncate to max_seq_len
+    if valid_seq_len < self.max_seq_len:
+        pad_size = self.max_seq_len - valid_seq_len
+        x = torch.cat([x, torch.zeros((pad_size, *x.shape[1:]), dtype=x.dtype)], dim=0)
+        mask = torch.cat([cloud_mask, torch.ones(pad_size, dtype=torch.bool)], dim=0)
+    else:
+        x = x[: self.max_seq_len]
+        mask = cloud_mask[: self.max_seq_len]
 
-        # Pad or truncate to a fixed temporal length; mask is True for padding OR simulated clouds.
-        if valid_seq_len < self.max_seq_len:
-            pad_size = self.max_seq_len - valid_seq_len
-            x = torch.cat([x, torch.zeros((pad_size, *x.shape[1:]), dtype=x.dtype)], dim=0)
-            mask = torch.cat([cloud_mask, torch.ones(pad_size, dtype=torch.bool)], dim=0)
-        else:
-            x = x[: self.max_seq_len]
-            mask = cloud_mask[: self.max_seq_len]
-
-        # x: [max_seq_len, 3 if to_rgb else 10, 128, 128], y: [128, 128], mask: [max_seq_len]
-        return x, y, mask
+    return x, y, mask
 
 
 def get_pastis_dataloaders(
