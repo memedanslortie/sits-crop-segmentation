@@ -2,7 +2,7 @@ seed: 42
 run_fold: 1
 
 data:
-  dataset_path: "/kaggle/input/pastis-dataset"
+  dataset_path: "/kaggle/input/datasets/almanoff/pastis-dataset"
   noloss_classes: [19]
   to_rgb: true
 
