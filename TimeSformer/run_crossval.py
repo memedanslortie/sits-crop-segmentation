@@ -28,7 +28,7 @@ def main():
         
     # Aggregate the final results
     print("\n" + "="*50)
-    print("📊 FINAL STATISTICAL RESULTS (5-FOLD CROSS-VALIDATION)")
+    print("STATISTICAL RESULTS (5-FOLD CROSS-VALIDATION)")
     print("="*50)
     
     mious = []

@@ -157,7 +157,7 @@ def main():
     
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    print(f"🚀 Initializing training on: {device}")
+    print(f"Initializing training on: {device}")
 
     # DataLoaders
     train_loader, val_loader, test_loader = get_pastis_dataloaders(
@@ -265,7 +265,7 @@ def main():
         if current_miou > best_val_miou:
             best_val_miou = current_miou
             torch.save(model.state_dict(), f"results/checkpoints/best_model_fold{config['experiment']['run_fold']}.pth")
-            print(f"🌟 New best model saved! (mIoU: {best_val_miou:.4f})")
+            print(f"New best model saved! (mIoU: {best_val_miou:.4f})")
 
     # --- FINAL TESTING PHASE ---
     print("\n Launching Final Evaluation on Test Fold...")
