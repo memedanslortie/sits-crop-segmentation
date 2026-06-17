@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 from vjepa2.src.hub.backbones import _make_vjepa2_1_model, _clean_backbone_key
@@ -23,7 +25,8 @@ def build_vjepa2_1_encoder(
 
     # Load pretrained weights (if requested)
     if pretrained:
-        from vjepa2.src.hub.backbones import ARCH_NAME_MAP, VJEPA_BASE_URL
+        from vjepa2.src.hub.backbones import ARCH_NAME_MAP
+        VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
         model_file = ARCH_NAME_MAP[model_name][-1]
         url = VJEPA_BASE_URL + f"/{model_file}.pt"
         state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
