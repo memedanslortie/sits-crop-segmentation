@@ -264,7 +264,7 @@ def train(cfg: dict) -> nn.Module:
     main = is_main(rank)
 
     # Load encoder and predictor on the correct GPU
-    encoder, _ = load_encoder_and_predictor(cfg, device)
+    encoder, _ = load_encoder_and_predictor(cfg, rank, device)
 
     if main:
         print(f"DDP active: {world_size} GPUs")
