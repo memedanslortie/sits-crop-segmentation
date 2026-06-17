@@ -21,6 +21,7 @@ dataset_scaling:
       lr: 2.0e-4
       merge_after_training: false
       patience_mlt: 3
+    - null
 
 # cloud_ablation:
 #   data.to_rgb: [false]
