@@ -14,9 +14,9 @@ def build_vjepa2_1_encoder(
     encoder, predictor = _make_vjepa2_1_model(
         model_name=model_name,
         img_size=128,
-        patch_size=16,
-        tubelet_size=2,
-        num_frames=64,
+        predictor_num_mask_tokens=8,
+        n_output_distillation=4,
+        return_all_tokens=True,
         pretrained=False,
         **kwargs,
     )
@@ -34,7 +34,7 @@ def build_vjepa2_1_encoder(
 
         # Load weights, ignoring size mismatches (pos_embed is handled by RoPE)
         encoder.load_state_dict(encoder_state_dict, strict=False)
-        print("Loaded pretrained weights (ignoring size mismatches).")
+        # print("Loaded pretrained weights (ignoring size mismatches).")
         if not is_rgb:
             # Replace the first layer of the patch embedding to accept `in_chans`
             # The patch_embed is a PatchEmbed3D module

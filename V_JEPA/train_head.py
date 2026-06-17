@@ -55,7 +55,11 @@ def load_encoder(cfg: dict, rank: int, device: torch.device):
 
     if rank == 0:
         print(f"Loading backbone '{backbone_name}' ...")
-        encoder_pretrained = build_vjepa2_1_encoder(pretrained=True)
+        encoder_pretrained = build_vjepa2_1_encoder(
+            backbone_name,
+            is_rgb=cfg["data"].get("to_rgb", False),
+            pretrained=True,
+        )
 
         encoder.load_state_dict(encoder_pretrained.state_dict())
 
