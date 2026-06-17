@@ -44,7 +44,7 @@ def main() -> None:
 
     if args.dry_run:
         for i, exp in enumerate(experiments):
-            print(f"[{i+1}/{len(experiments)}] {exp.group} / {exp.name}")
+            print(f"[{i+1}/{len(experiments)}] {exp.group} / {exp.name} \n")
         return
 
     rank, world_size, device = setup_ddp()

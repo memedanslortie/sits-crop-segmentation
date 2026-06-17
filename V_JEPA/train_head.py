@@ -356,8 +356,12 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     optimizer = torch.optim.AdamW(
         param_groups, weight_decay=cfg["training"].get("weight_decay", 1e-4)
     )
+    _lora_mlt = lora_cfg.get("patience_mlt", 2) if lora_active else 1
+    _lr_patience = cfg["training"].get("lr_patience", 10) * _lora_mlt
+    _stp_patience = cfg["training"].get("stp_patience", 25) * _lora_mlt
+
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=cfg["training"].get("lr_patience", 10), factor=0.5,
+        optimizer, mode="max", patience=_lr_patience, factor=0.5,
     )
     scaler = GradScaler()
 
@@ -366,10 +370,11 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     suffix = "lora" if lora_active else "frozen"
     best_ckpt = ckpt_dir / f"best_{suffix}_fold{cfg['run_fold']}.pt"
-    best_val_loss = float("inf")
+    best_val_miou = -1.0
 
     # Training loop
     n_epochs: int = cfg["training"]["epochs"]
+    epochs_since_improve = 0
     for epoch in range(1, n_epochs + 1):
         # Shuffle is correctly seeded per epoch by DistributedSampler
         train_loader.sampler.set_epoch(epoch)
@@ -396,7 +401,13 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             evaluator=evaluator,
         )
 
-        scheduler.step(val_m["loss"])
+        val_miou = val_m["mIoU"]
+
+        scheduler.step(val_miou)
+
+        improved = val_miou > best_val_miou
+        if improved:
+            best_val_miou = val_miou
 
         if main:
             print(
@@ -404,14 +415,12 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
                 f"train loss={train_m['loss']:.4f} | "
                 f"val loss={val_m['loss']:.4f} | "
                 f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
-                f"mIoU={val_m.get('mIoU', 0):.4f} | "
+                f"mIoU={val_miou:.4f}{'*' if improved else ' '} | "
                 f"F1={val_m.get('Macro_F1', 0):.4f}  "
                 f"({time.perf_counter() - t0:.1f}s)"
             )
 
-            if val_m["loss"] < best_val_loss:
-                best_val_loss = val_m["loss"]
-                # Save raw (unwrapped) state dicts
+            if improved:
                 torch.save(
                     {
                         "head": _unwrap(head).state_dict(),
@@ -420,8 +429,17 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
                     best_ckpt,
                 )
 
-        # All ranks must agree on whether to save; barrier keeps them in sync
+        # broadcast improved flag so early stopping is consistent
+        improved_tensor = torch.tensor(int(improved), device=device)
+        dist.broadcast(improved_tensor, src=0)
+        epochs_since_improve = 0 if improved_tensor.item() else epochs_since_improve + 1
+
         dist.barrier()
+
+        if epochs_since_improve >= _stp_patience:
+            if main:
+                print(f"Early stopping: no mIoU improvement for {_stp_patience} epochs.")
+            break
 
     # Restore best weights
     ckpt = torch.load(best_ckpt, map_location=device)
@@ -433,7 +451,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             print("LoRA weights merged into encoder.")
 
     if main:
-        print(f"Best val loss {best_val_loss:.4f} -> {best_ckpt}")
+        print(f"Best val mIoU {best_val_miou:.4f} -> {best_ckpt}")
 
     # cleanup_ddp()
     return best_ckpt

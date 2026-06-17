@@ -9,6 +9,7 @@ adaptation_comparison:
       alpha: 16.0
       lr: 2.0e-4
       merge_after_training: false
+      patience_mlt: 3
     - null
 
 # dataset_scaling:
