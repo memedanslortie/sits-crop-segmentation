@@ -6,6 +6,7 @@ for PASTIS crop segmentation using native 3D video encoding.
 import os
 import time
 from pathlib import Path
+import importlib
 
 import torch
 import torch.distributed as dist
@@ -20,7 +21,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from utils.metrics import SITS_Evaluator
-
 
 def setup_ddp() -> tuple[int, int, torch.device]:
     """Initialise the process group and return (rank, world_size, device)."""
@@ -38,6 +38,49 @@ def cleanup_ddp() -> None:
 def is_main(rank: int) -> bool:
     return rank == 0
 
+def load_encoder_and_predictor(cfg: dict, rank: int, device: torch.device):
+    """
+    Build encoder + predictor from backbones.py using the backbone name in cfg.
+    Only rank 0 loads the model, then broadcasts to all ranks.
+    """
+    backbone_name = cfg["model"]["backbone"]
+    if backbone_name is None:
+        raise ValueError(
+            f"Unknown backbone '{backbone_name}'. "
+        )
+
+    # Only rank 0 loads the model
+    if rank == 0:
+        backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
+        build_fn = getattr(backbones, backbone_name)
+        print(f"Loading backbone '{backbone_name}' via backbones.{backbone_name}() ...")
+        encoder, predictor = build_fn(pretrained=True)
+        print("Backbone loaded.")
+    else:
+        encoder, predictor = None, None
+
+    # Broadcast model state dicts to all ranks
+    if rank == 0:
+        encoder_state = encoder.state_dict()
+        predictor_state = predictor.state_dict()
+    else:
+        encoder_state = None
+        predictor_state = None
+
+    # Synchronize
+    dist.barrier()
+
+    # All ranks create the model architecture (but only rank 0 has weights)
+    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
+    build_fn = getattr(backbones, backbone_name)
+    encoder, predictor = build_fn(pretrained=False)
+
+    # Only rank 0 has the weights; others will load from rank 0
+    if rank != 0:
+        encoder.load_state_dict(encoder_state)
+        predictor.load_state_dict(predictor_state)
+
+    return encoder.to(device), predictor.to(device)
 
 class TemporalMeanPool(nn.Module):
     """Mean-pool 3D video patch tokens over valid (non-padded) temporal patches."""
@@ -213,12 +256,15 @@ def _one_epoch(
     return out
 
 
-def train(cfg: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:
+def train(cfg: dict) -> nn.Module:
     from utils.load_data import get_pastis_dataloaders
 
     # DDP init
     rank, world_size, device = setup_ddp()
     main = is_main(rank)
+
+    # Load encoder and predictor on the correct GPU
+    encoder, _ = load_encoder_and_predictor(cfg, device)
 
     if main:
         print(f"DDP active: {world_size} GPUs")

@@ -11,7 +11,6 @@ handled inside train_head.train().
 """
 
 import argparse
-import importlib
 
 import yaml
 
@@ -23,45 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train_head import train
 
 
-# Map config backbone name -> function in backbones.py
-_BACKBONE_FN = {
-    "vjepa2_1_vit_base_384":    "vjepa2_1_vit_base_384",
-    "vjepa2_1_vit_large_384":   "vjepa2_1_vit_large_384",
-    "vjepa2_1_vit_giant_384":   "vjepa2_1_vit_giant_384",
-    "vjepa2_1_vit_gigantic_384":"vjepa2_1_vit_gigantic_384",
-    "vit_large":                "vjepa2_vit_large",
-    "vit_huge":                 "vjepa2_vit_huge",
-    "vit_giant":                "vjepa2_vit_giant",
-    "vit_giant_384":            "vjepa2_vit_giant_384",
-    "vit_ac_giant":             "vjepa2_ac_vit_giant",
-}
-
-
-def load_encoder_and_predictor(cfg: dict):
-    """
-    Build encoder + predictor from backbones.py using the backbone name in cfg.
-    Models are loaded on CPU; train_head.train() moves them to the correct GPU.
-    """
-    backbone_name = cfg["model"]["backbone"]
-    fn_name = _BACKBONE_FN.get(backbone_name)
-    if fn_name is None:
-        raise ValueError(
-            f"Unknown backbone '{backbone_name}'. "
-            f"Valid options: {list(_BACKBONE_FN)}"
-        )
-
-    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
-    build_fn = getattr(backbones, fn_name)
-
-    print(f"Loading backbone '{backbone_name}' via backbones.{fn_name}() ...")
-    encoder, predictor = build_fn(pretrained=True)
-    print("Backbone loaded.")
-    return encoder, predictor
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="V-JEPA segmentation head training")
-    parser.add_argument("--config", default="config.yaml", help="Path to YAML config")
+    parser.add_argument("--config", default="config.yaml", help="Path to base YAML config")
+    # parser.add_argument("--experiments", default="experiments.yaml", help="Experiments YAML (optional)")
+    # parser.add_argument("--group", default=None, help="Run only experiments from this group (default: all groups)")
+    # parser.add_argument("--single", action="store_true", help="Ignore experiments.yaml and run the base config once")
     return parser.parse_args()
 
 
@@ -70,8 +36,7 @@ def main() -> None:
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    encoder, predictor = load_encoder_and_predictor(cfg)
-    train(cfg, encoder, predictor)
+    train(cfg)
 
 
 if __name__ == "__main__":
