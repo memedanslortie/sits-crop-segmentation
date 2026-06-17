@@ -12,9 +12,15 @@ adaptation_comparison:
       patience_mlt: 3
     - null
 
-# dataset_scaling:
-#   data.to_rgb: [false]
-#   ablation.dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
+dataset_scaling:
+  data.to_rgb: [false]
+  ablation.dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
+  training.lora:
+    - rank: 8
+      alpha: 16.0
+      lr: 2.0e-4
+      merge_after_training: false
+      patience_mlt: 3
 
 # cloud_ablation:
 #   data.to_rgb: [false]

@@ -21,6 +21,7 @@ training:
   hidden_dim: 512
   lr: 1.0e-3
   weight_decay: 1.0e-4
-  lr_patience: 10
+  lr_patience: 15
+  stp_patience: 27
   checkpoint_dir: "/kaggle"
   class_weighting: true
