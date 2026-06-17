@@ -225,10 +225,12 @@ def _one_epoch(
     total_loss = 0.0
     n_batches = 0
 
+    ctx = torch.enable_grad() if is_train else torch.no_grad()
+
     for x, y, mask in loader:
         x, y, mask = x.to(device), y.to(device), mask.to(device)
 
-        with autocast("cuda"):
+        with ctx, autocast("cuda"):
             enc_ctx = torch.enable_grad() if (is_train and lora_active) else torch.no_grad()
             with enc_ctx:
                 tokens = _encode_sits(encoder, x, img_size)
