@@ -15,12 +15,12 @@ model:
 
 training:
   num_classes: 20
-  epochs: 10
+  epochs: 100
   batch_size: 16
   img_size: 128
   hidden_dim: 512
   lr: 1.0e-3
   weight_decay: 1.0e-4
   lr_patience: 10
-  checkpoint_dir: "../data/checkpoints/vjepa"
+  checkpoint_dir: "/kaggle"
   class_weighting: true

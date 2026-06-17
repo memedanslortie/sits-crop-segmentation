@@ -253,6 +253,9 @@ def _one_epoch(
 
     out = {"loss": total_loss / max(n_batches, 1)}
     if evaluator is not None:
+        if dist.is_initialized():
+            dist.all_reduce(evaluator.conf_matrix, op=dist.ReduceOp.SUM)
+        
         out.update(evaluator.compute_metrics())
     return out
 
@@ -448,4 +451,4 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
         print(f"Best val loss {best_val_loss:.4f} -> {best_ckpt}")
 
     # cleanup_ddp()
-    return _unwrap(head)
+    return best_ckpt

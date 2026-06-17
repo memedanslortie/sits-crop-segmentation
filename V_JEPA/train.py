@@ -3,9 +3,7 @@ train.py — entry point called by torchrun.
 """
 
 import argparse
-
 import yaml
-
 import sys
 import torch.distributed as dist
 from pathlib import Path
@@ -13,7 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from train_head import train, setup_ddp, cleanup_ddp
-from utils.experiments import build_experiments, Experiment
+from evaluate import evaluate
+from experiment import build_experiments, Experiment
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,7 +58,15 @@ def main() -> None:
 
             dist.barrier()
 
-            train(exp.config, rank, world_size, device)
+            best_ckpt_path = train(exp.config, rank, world_size, device)
+            
+            dist.barrier()
+            
+            if best_ckpt_path and best_ckpt_path.exists():
+                evaluate(exp.config, rank, world_size, device, best_ckpt_path)
+            else:
+                if rank == 0:
+                    print(f"Warning: Checkpoint {best_ckpt_path} not found. Skipping evaluation.")
 
     finally:
         cleanup_ddp()

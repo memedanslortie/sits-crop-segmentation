@@ -1,12 +1,9 @@
 default: {}
 
-dataset_scaling:
-  ablation.dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
-
-cloud_ablation:
-  ablation.cloud_drop_rate: [0.0, 0.5, 1.0]
-
 adaptation_comparison:
+  data.to_rgb: 
+    - true
+    - false
   training.lora:
     - rank: 8
       alpha: 16.0
@@ -14,7 +11,16 @@ adaptation_comparison:
       merge_after_training: false
     - null
 
+dataset_scaling:
+  data.to_rgb: [false]
+  ablation.dataset_fraction: [0.01, 0.03, 0.1, 0.3, 1.0]
+
+cloud_ablation:
+  data.to_rgb: [false]
+  ablation.cloud_drop_rate: [0.0, 0.5, 1.0]
+
 adaptation_vs_data:
+  data.to_rgb: [false]
   ablation.dataset_fraction: [0.01, 0.1, 1.0]
   training.lora:
     - rank: 8
