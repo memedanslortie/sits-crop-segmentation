@@ -2,7 +2,14 @@ import os
 
 import torch
 import torch.nn as nn
-from vjepa2.src.hub.backbones import _make_vjepa2_1_model, _clean_backbone_key
+from vjepa2.src.hub.backbones import _make_vjepa2_1_model, _clean_backbone_key, ARCH_NAME_MAP
+
+_CHECKPOINT_KEY_MAP = {
+    "vjepa2_1_vit_base_384":     "ema_encoder",
+    "vjepa2_1_vit_large_384":    "ema_encoder",
+    "vjepa2_1_vit_giant_384":    "target_encoder",
+    "vjepa2_1_vit_gigantic_384": "target_encoder",
+}
 
 def build_vjepa2_1_encoder(
     model_name: str = "vjepa2_1_vit_large_384",
@@ -10,7 +17,6 @@ def build_vjepa2_1_encoder(
     pretrained: bool = True,
     **kwargs,
 ):
-    # Build the encoder with img_size=128
     encoder, predictor = _make_vjepa2_1_model(
         model_name=model_name,
         img_size=128,
@@ -22,15 +28,14 @@ def build_vjepa2_1_encoder(
     )
     del predictor
 
-
-    # Load pretrained weights (if requested)
     if pretrained:
-        from vjepa2.src.hub.backbones import ARCH_NAME_MAP
         VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
         model_file = ARCH_NAME_MAP[model_name][-1]
         url = VJEPA_BASE_URL + f"/{model_file}.pt"
         state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
-        encoder_state_dict = _clean_backbone_key(state_dict["ema_encoder"])
+
+        checkpoint_key = _CHECKPOINT_KEY_MAP[model_name]
+        encoder_state_dict = _clean_backbone_key(state_dict[checkpoint_key])
 
         # Load weights, ignoring size mismatches (pos_embed is handled by RoPE)
         encoder.load_state_dict(encoder_state_dict, strict=False)

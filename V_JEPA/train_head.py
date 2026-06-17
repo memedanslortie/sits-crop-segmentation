@@ -25,12 +25,14 @@ from custom_build import build_vjepa2_1_encoder
 
 def setup_ddp() -> tuple[int, int, torch.device]:
     """Initialise the process group and return (rank, world_size, device)."""
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(
+        backend="nccl",
+        device_id=torch.device(f"cuda:{int(os.environ['LOCAL_RANK'])}"),
+    )
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     torch.cuda.set_device(rank)
-    device = torch.device(f"cuda:{rank}")
-    return rank, world_size, device
+    return rank, world_size, torch.device(f"cuda:{rank}")
 
 def cleanup_ddp() -> None:
     dist.destroy_process_group()
@@ -39,39 +41,76 @@ def cleanup_ddp() -> None:
 def is_main(rank: int) -> bool:
     return rank == 0
 
-def load_encoder(cfg: dict, rank: int, device: torch.device):
+def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     """
-    Build encoder + predictor from backbones.py using the backbone name in cfg.
-    Only rank 0 loads the model, then broadcasts to all ranks.
+    Memory-safe encoder loading for large models under DDP.
+ 
+    Strategy
+    --------
+    1. Rank 0 downloads the checkpoint to a known cache path on disk
+       (torch.hub.load_state_dict_from_url caches automatically).
+    2. All ranks barrier — now the file is guaranteed to be on disk.
+    3. Every rank builds the model with pretrained=False (cheap, no download),
+       then loads the cached state dict directly onto its own GPU
+       with map_location=device.  Peak extra RAM = one state dict on CPU
+       per rank (loaded and freed immediately), never two full GPU copies.
+    4. The patch-embed is replaced for multi-spectral input inside
+       build_vjepa2_1_encoder; we only need to load the base weights here.
     """
+    from vjepa2.src.hub.backbones import ARCH_NAME_MAP, _clean_backbone_key
+ 
     backbone_name = cfg["model"]["backbone"]
-
+    is_rgb = cfg["data"].get("to_rgb", False)
+ 
+    VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
+    model_file = ARCH_NAME_MAP[backbone_name][-1]
+    url = VJEPA_BASE_URL + f"/{model_file}.pt"
+ 
+    if is_main(rank):
+        print(f"[rank 0] Ensuring checkpoint is cached: {url}")
+        raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+        ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        encoder_cache = ckpt_dir / f"encoder_weights_{model_file}.pt"
+        if not encoder_cache.exists():
+            encoder_sd = _clean_backbone_key(raw["ema_encoder"])
+            torch.save(encoder_sd, encoder_cache)
+            print(f"[rank 0] Encoder state dict cached to {encoder_cache}")
+        else:
+            print(f"[rank 0] Using existing encoder cache {encoder_cache}")
+        del raw
+        torch.cuda.empty_cache()
+ 
+    dist.barrier()
+ 
+    ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
+    encoder_cache = ckpt_dir / f"encoder_weights_{model_file}.pt"
+ 
     encoder = build_vjepa2_1_encoder(
-            model_name=backbone_name,
-            is_rgb=cfg["data"].get("to_rgb", False),
-            pretrained=False,
-        )
+        model_name=backbone_name,
+        is_rgb=is_rgb,
+        pretrained=False,
+    )
+ 
+    _CHECKPOINT_KEY_MAP = {
+        "vjepa2_1_vit_base_384":     "ema_encoder",
+        "vjepa2_1_vit_large_384":    "ema_encoder",
+        "vjepa2_1_vit_giant_384":    "target_encoder",
+        "vjepa2_1_vit_gigantic_384": "target_encoder",
+    }
+    checkpoint_key = _CHECKPOINT_KEY_MAP[backbone_name]
+    encoder_sd = _clean_backbone_key(raw[checkpoint_key])
+    missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
+    if is_main(rank) and (missing or unexpected):
+        print(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
+    del encoder_sd
+    torch.cuda.empty_cache()
+ 
     encoder = encoder.to(device)
-
-    if rank == 0:
-        print(f"Loading backbone '{backbone_name}' ...")
-        encoder_pretrained = build_vjepa2_1_encoder(
-            backbone_name,
-            is_rgb=cfg["data"].get("to_rgb", False),
-            pretrained=True,
-        )
-
-        encoder.load_state_dict(encoder_pretrained.state_dict())
-
-        del encoder_pretrained
-        print("Backbone loaded and temp copies freed.")
-
-    for param in encoder.parameters():
-        dist.broadcast(param.data, src=0)
-
-    for buf in encoder.buffers():
-        dist.broadcast(buf, src=0)
-
+ 
+    if is_main(rank):
+        print(f"Backbone '{backbone_name}' loaded on all ranks.")
+ 
     return encoder
 
 class TemporalMeanPool(nn.Module):
