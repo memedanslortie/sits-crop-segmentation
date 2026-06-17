@@ -51,12 +51,11 @@ def main() -> None:
 
     rank, world_size, device = setup_ddp()
 
-    log_dir = Path(base_cfg.get("training", {}).get("log_dir", "./logs"))
-    setup_logger(rank, log_dir=log_dir, run_name=exp.name)
-    log = get_logger()
-
     try:
         for i, exp in enumerate(experiments):
+            log_dir = Path(base_cfg.get("training", {}).get("log_dir", "./logs"))
+            setup_logger(rank, log_dir=log_dir, run_name=exp.name)
+            log = get_logger()
             if rank == 0:
                 log.info(f"\n{'='*60}\n"
                          f"Experiment [{i+1}/{len(experiments)}]: {exp.name}\n"
