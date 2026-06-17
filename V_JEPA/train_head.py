@@ -49,38 +49,37 @@ def load_encoder_and_predictor(cfg: dict, rank: int, device: torch.device):
             f"Unknown backbone '{backbone_name}'. "
         )
 
-    # Only rank 0 loads the model
-    if rank == 0:
-        backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
-        build_fn = getattr(backbones, backbone_name)
-        print(f"Loading backbone '{backbone_name}' via backbones.{backbone_name}() ...")
-        encoder, predictor = build_fn(pretrained=True)
-        print("Backbone loaded.")
-    else:
-        encoder, predictor = None, None
+    # All ranks create the model architecture (without weights)
+    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
+    build_fn = getattr(backbones, backbone_name)
+    encoder, predictor = build_fn(pretrained=False)
+    encoder = encoder.to(device)
+    predictor = predictor.to(device)
 
-    # Broadcast model state dicts to all ranks
+    # Only rank 0 loads the pretrained weights
     if rank == 0:
-        encoder_state = encoder.state_dict()
-        predictor_state = predictor.state_dict()
+        print(f"Loading backbone '{backbone_name}' via backbones.{backbone_name}() ...")
+        encoder_pretrained, predictor_pretrained = build_fn(pretrained=True)
+        encoder_state = encoder_pretrained.state_dict()
+        predictor_state = predictor_pretrained.state_dict()
+        print("Backbone loaded.")
     else:
         encoder_state = None
         predictor_state = None
 
-    # Synchronize
-    dist.barrier()
+    encoder_state_list = [encoder_state] if rank == 0 else [None]
+    predictor_state_list = [predictor_state] if rank == 0 else [None]
 
-    # All ranks create the model architecture (but only rank 0 has weights)
-    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
-    build_fn = getattr(backbones, backbone_name)
-    encoder, predictor = build_fn(pretrained=False)
+    dist.broadcast_object_list(encoder_state_list, src=0)
+    dist.broadcast_object_list(predictor_state_list, src=0)
 
-    # Only rank 0 has the weights; others will load from rank 0
-    if rank != 0:
-        encoder.load_state_dict(encoder_state)
-        predictor.load_state_dict(predictor_state)
+    encoder_state = encoder_state_list[0]
+    predictor_state = predictor_state_list[0]
 
-    return encoder.to(device), predictor.to(device)
+    encoder.load_state_dict(encoder_state)
+    predictor.load_state_dict(predictor_state)
+
+    return encoder, predictor
 
 class TemporalMeanPool(nn.Module):
     """Mean-pool 3D video patch tokens over valid (non-padded) temporal patches."""
