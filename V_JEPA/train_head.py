@@ -201,6 +201,8 @@ def train(cfg: dict, encoder: nn.Module, predictor: nn.Module) -> nn.Module:
             p.requires_grad_(False)
         encoder.eval()
 
+    torch.cuda.empty_cache()
+
     # Dynamic 3D Grid Calculation
     img_size: int = cfg["training"].get("img_size", 384)
     with torch.no_grad():
