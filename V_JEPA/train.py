@@ -50,7 +50,7 @@ def load_encoder_and_predictor(cfg: dict):
             f"Valid options: {list(_BACKBONE_FN)}"
         )
 
-    backbones = importlib.import_module("backbones", "vjepa2.src.hub")
+    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
     build_fn = getattr(backbones, fn_name)
 
     print(f"Loading backbone '{backbone_name}' via backbones.{fn_name}() ...")
