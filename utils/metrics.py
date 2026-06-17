@@ -3,6 +3,9 @@ import json
 import torch
 import numpy as np
 
+from utils.logging import get_logger
+log = get_logger()
+
 # PASTIS official class names (0-19) based on official documentation.
 PASTIS_CLASSES = {
     0: "Background",
@@ -150,8 +153,8 @@ class SITS_Evaluator:
         with open(filepath, "w") as f:
             json.dump(results, f, indent=4)
 
-        print(f"✅ Evaluation complete → {filepath}")
-        print(
+        log.info(f"✅ Evaluation complete → {filepath}")
+        log.info(
             f"📊 mIoU: {results['mIoU']:.4f} | Macro F1: {results['Macro_F1']:.4f}"
         )
 

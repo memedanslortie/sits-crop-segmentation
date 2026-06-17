@@ -23,6 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from utils.metrics import SITS_Evaluator
 from custom_build import build_vjepa2_1_encoder
 
+from utils.logging import get_logger
+log = get_logger()
+
 def setup_ddp() -> tuple[int, int, torch.device]:
     """Initialise the process group and return (rank, world_size, device)."""
     dist.init_process_group(
@@ -67,7 +70,7 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     url = VJEPA_BASE_URL + f"/{model_file}.pt"
  
     if is_main(rank):
-        print(f"[rank 0] Ensuring checkpoint is cached: {url}")
+        log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
         raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
         ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -75,9 +78,9 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         if not encoder_cache.exists():
             encoder_sd = _clean_backbone_key(raw["ema_encoder"])
             torch.save(encoder_sd, encoder_cache)
-            print(f"[rank 0] Encoder state dict cached to {encoder_cache}")
+            log.info(f"[rank 0] Encoder state dict cached to {encoder_cache}")
         else:
-            print(f"[rank 0] Using existing encoder cache {encoder_cache}")
+            log.info(f"[rank 0] Using existing encoder cache {encoder_cache}")
         del raw
         torch.cuda.empty_cache()
  
@@ -102,14 +105,14 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     encoder_sd = _clean_backbone_key(raw[checkpoint_key])
     missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
     if is_main(rank) and (missing or unexpected):
-        print(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
+        log.info(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
     del encoder_sd
     torch.cuda.empty_cache()
  
     encoder = encoder.to(device)
  
     if is_main(rank):
-        print(f"Backbone '{backbone_name}' loaded on all ranks.")
+        log.info(f"Backbone '{backbone_name}' loaded on all ranks.")
  
     return encoder
 
@@ -178,10 +181,10 @@ def _compute_class_weights(
     # Rank-0 computes/writes, then we barrier so all ranks can read safely.
     if is_main(rank):
         if cache_path.exists():
-            print(f"Loading cached class weights from {cache_path}")
+            log.info(f"Loading cached class weights from {cache_path}")
             weights = torch.load(cache_path, map_location="cpu")
         else:
-            print("Computing class weights (one-time scan of training labels)...")
+            log.info("Computing class weights (one-time scan of training labels)...")
             counts = train_dataset.label_counts(num_classes)
             for c in noloss_classes:
                 counts[c] = 0.0
@@ -299,7 +302,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     encoder = load_encoder(cfg, rank, device)
 
     if main:
-        print(f"DDP active: {world_size} GPUs")
+        log.info(f"DDP active: {world_size} GPUs")
 
     # Reproducibility
     torch.manual_seed(cfg["seed"] + rank)  # Different seed per rank for data augmentation
@@ -363,7 +366,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
         patch_grid_3d = (t_p, h_p, w_p)
 
     if main:
-        print(f"Patch grid 3D: {patch_grid_3d} | embed_dim: {embed_dim}")
+        log.info(f"Patch grid 3D: {patch_grid_3d} | embed_dim: {embed_dim}")
 
     # Head + Pool
     head = SegHead(
@@ -453,7 +456,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             best_val_miou = val_miou
 
         if main:
-            print(
+            log.info(
                 f"[Fold {cfg['run_fold']} | {epoch:03d}/{n_epochs}]  "
                 f"train loss={train_m['loss']:.4f} | "
                 f"val loss={val_m['loss']:.4f} | "
@@ -481,7 +484,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
 
         if epochs_since_improve >= _stp_patience:
             if main:
-                print(f"Early stopping: no mIoU improvement for {_stp_patience} epochs.")
+                log.info(f"Early stopping: no mIoU improvement for {_stp_patience} epochs.")
             break
 
     # Restore best weights
@@ -491,10 +494,10 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
         _unwrap(encoder).load_state_dict(ckpt["encoder"])
         if lora_cfg.get("merge_after_training", False) and main:
             encoder = _unwrap(encoder).merge_and_unload()
-            print("LoRA weights merged into encoder.")
+            log.info("LoRA weights merged into encoder.")
 
     if main:
-        print(f"Best val mIoU {best_val_miou:.4f} -> {best_ckpt}")
+        log.info(f"Best val mIoU {best_val_miou:.4f} -> {best_ckpt}")
 
     # cleanup_ddp()
     return best_ckpt

@@ -14,6 +14,8 @@ from train_head import train, setup_ddp, cleanup_ddp
 from evaluate import evaluate
 from experiment import build_experiments, Experiment
 
+from utils.logging import setup_logger, get_logger
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="V-JEPA segmentation head training")
@@ -44,17 +46,21 @@ def main() -> None:
 
     if args.dry_run:
         for i, exp in enumerate(experiments):
-            print(f"[{i+1}/{len(experiments)}] {exp.group} / {exp.name} \n")
+            log.info(f"[{i+1}/{len(experiments)}] {exp.group} / {exp.name} \n")
         return
 
     rank, world_size, device = setup_ddp()
 
+    log_dir = Path(base_cfg.get("training", {}).get("log_dir", "./logs"))
+    setup_logger(rank, log_dir=log_dir, run_name=exp.name)
+    log = get_logger()
+
     try:
         for i, exp in enumerate(experiments):
             if rank == 0:
-                print(f"\n{'='*60}")
-                print(f"Experiment [{i+1}/{len(experiments)}]: {exp.name}")
-                print(f"{'='*60}")
+                log.info(f"\n{'='*60}\n"
+                         f"Experiment [{i+1}/{len(experiments)}]: {exp.name}\n"
+                         f"{'='*60}")
 
             dist.barrier()
 
@@ -66,7 +72,7 @@ def main() -> None:
                 evaluate(exp.config, rank, world_size, device, best_ckpt_path)
             else:
                 if rank == 0:
-                    print(f"Warning: Checkpoint {best_ckpt_path} not found. Skipping evaluation.")
+                    log.warning(f"Checkpoint {best_ckpt_path} not found. Skipping evaluation.")
 
     finally:
         cleanup_ddp()

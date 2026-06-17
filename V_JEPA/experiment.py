@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
+from utils.logging import get_logger
+log = get_logger()
+
 def load_yaml(path: str | Path) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)

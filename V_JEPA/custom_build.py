@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 from vjepa2.src.hub.backbones import _make_vjepa2_1_model, _clean_backbone_key, ARCH_NAME_MAP
 
+from utils.logging import get_logger
+log = get_logger()
+
 _CHECKPOINT_KEY_MAP = {
     "vjepa2_1_vit_base_384":     "ema_encoder",
     "vjepa2_1_vit_large_384":    "ema_encoder",
@@ -39,7 +42,7 @@ def build_vjepa2_1_encoder(
 
         # Load weights, ignoring size mismatches (pos_embed is handled by RoPE)
         encoder.load_state_dict(encoder_state_dict, strict=False)
-        # print("Loaded pretrained weights (ignoring size mismatches).")
+        # log.info("Loaded pretrained weights (ignoring size mismatches).")
         if not is_rgb:
             # Replace the first layer of the patch embedding to accept `in_chans`
             # The patch_embed is a PatchEmbed3D module

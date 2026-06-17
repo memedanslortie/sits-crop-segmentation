@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
+from utils.logging import get_logger
+log = get_logger()
 
 class PASTISDataset(Dataset):
     """PASTIS-HD Sentinel-2 time series dataset with optional subsampling and cloud simulation."""
@@ -46,13 +48,13 @@ class PASTISDataset(Dataset):
             rng.shuffle(patch_ids)
             keep_count = int(len(patch_ids) * dataset_fraction)
             self.patch_ids = patch_ids[:keep_count]
-            print(
+            log.info(
                 f"Data Efficiency [{dataset_fraction:.0%}]: kept {len(self.patch_ids)}/{len(patch_ids)} "
                 f"patches (seed={seed})."
             )
         else:
             self.patch_ids = patch_ids
-            print(f"Loaded folds {target_folds}: {len(self.patch_ids)} patches.")
+            log.info(f"Loaded folds {target_folds}: {len(self.patch_ids)} patches.")
 
         if self.norm:
             with open(self.data_path / "NORM_S2_patch.json") as f:
@@ -145,7 +147,7 @@ def get_pastis_dataloaders(
     val_fold = 5 if test_fold == 1 else test_fold - 1
     train_folds = [f for f in all_folds if f not in (val_fold, test_fold)]
 
-    print(
+    log.info(
         f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} | DDP: {ddp} ---"
     )
 

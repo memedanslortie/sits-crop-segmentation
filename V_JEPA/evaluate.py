@@ -25,6 +25,9 @@ from train_head import (
 from utils.metrics import SITS_Evaluator
 from utils.load_data import get_pastis_dataloaders
 
+from utils.logging import get_logger
+log = get_logger()
+
 
 def evaluate(cfg: dict, rank: int, world_size: int, device: torch.device, ckpt_path: Path) -> dict:
     main = is_main(rank)
@@ -33,10 +36,10 @@ def evaluate(cfg: dict, rank: int, world_size: int, device: torch.device, ckpt_p
     torch.cuda.empty_cache()
 
     if main:
-        print(f"\n{'='*60}")
-        print(f"Starting Evaluation on Test Set")
-        print(f"Loading checkpoint: {ckpt_path}")
-        print(f"{'='*60}")
+        log.info(f"\n{'='*60}\n"
+                 f"Starting Evaluation on Test Set\n"
+                 f"Loading checkpoint: {ckpt_path}\n"
+                 f"{'='*60}")
 
     # 1. Load Data (Force full evaluation with fraction=1.0 and cloud_rate=0.0)
     _, _, test_loader = get_pastis_dataloaders(
@@ -125,7 +128,7 @@ def evaluate(cfg: dict, rank: int, world_size: int, device: torch.device, ckpt_p
         
         # Save JSON to disk and print to terminal
         metrics = evaluator.save_results(results_file)
-        print(f"Evaluation elapsed time: {time.perf_counter() - t0:.1f}s")
+        log.info(f"Evaluation elapsed time: {time.perf_counter() - t0:.1f}s")
             
     # Keep ranks in sync before exiting
     dist.barrier()
