@@ -310,6 +310,10 @@ def main():
         evaluator.reset()
         val_loss = 0.0
 
+        # Validate on a single GPU (unwrapped model): inference is cheap, and this avoids
+        # DataParallel choking on a size-1 last batch for folds whose val set % batch == 1.
+        eval_model = get_base_model(model)
+
         with torch.no_grad():
             for batch_x, batch_y, batch_mask in tqdm(val_loader, desc="Validation"):
                 batch_x = batch_x.to(device)
@@ -317,7 +321,7 @@ def main():
                 batch_mask = batch_mask.to(device)
 
                 with torch.amp.autocast('cuda', enabled=use_cuda):
-                    logits = model(batch_x, batch_mask)
+                    logits = eval_model(batch_x, batch_mask)
                     loss = criterion(logits, batch_y)
 
                 val_loss += loss.item()

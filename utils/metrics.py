@@ -81,7 +81,8 @@ class SITS_Evaluator:
 
         # Intersection over Union (IoU) per class & Mean IoU
         iou_per_class = np.where(support > 0, TP / np.maximum(TP + FP + FN, 1), np.nan)
-        mIoU = np.nanmean(iou_per_class)
+        # Guard against an all-NaN slice (e.g. a single patch with no scored pixels)
+        mIoU = float(np.nanmean(iou_per_class)) if np.any(support > 0) else 0.0
 
         # F1-Score per class & Macro F1
         precision = TP / np.maximum(TP + FP, 1)
@@ -91,7 +92,7 @@ class SITS_Evaluator:
             2 * precision * recall / np.maximum(precision + recall, 1e-10),
             np.nan,
         )
-        macro_f1 = np.nanmean(f1_per_class)
+        macro_f1 = float(np.nanmean(f1_per_class)) if np.any(support > 0) else 0.0
 
         # Package results into a clean dictionary
         results = {
