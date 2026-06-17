@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
 
 class PASTISDataset(Dataset):
@@ -84,7 +84,9 @@ class PASTISDataset(Dataset):
             else:
                 x = (x - self.mean) / self.std
 
-        y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
+        y = torch.from_numpy(
+            np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]
+        ).long()
 
         valid_seq_len = x.shape[0]
         cloud_mask = torch.zeros(valid_seq_len, dtype=torch.bool)
@@ -127,6 +129,8 @@ def get_pastis_dataloaders(
     fraction: float = 1.0,
     cloud_rate: float = 0.0,
     to_rgb: bool = False,
+    rank: int | None = None,
+    world_size: int | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Build train/val/test loaders following the PASTIS 5-fold cross-validation protocol.
 
@@ -134,19 +138,68 @@ def get_pastis_dataloaders(
     evaluated on 100% clean data, and test optionally inherits `cloud_rate` for
     cloud-robustness evaluation.
     """
+    ddp = rank is not None and world_size is not None
+
     all_folds = [1, 2, 3, 4, 5]
     test_fold = run_fold
     val_fold = 5 if test_fold == 1 else test_fold - 1
     train_folds = [f for f in all_folds if f not in (val_fold, test_fold)]
 
-    print(f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} ---")
+    print(
+        f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} | DDP: {ddp} ---"
+    )
 
-    train_dataset = PASTISDataset(data_path, train_folds, dataset_fraction=fraction, cloud_drop_rate=cloud_rate, to_rgb=to_rgb)
-    val_dataset = PASTISDataset(data_path, [val_fold], dataset_fraction=1.0, cloud_drop_rate=0.0, to_rgb=to_rgb)
-    test_dataset = PASTISDataset(data_path, [test_fold], dataset_fraction=1.0, cloud_drop_rate=cloud_rate, to_rgb=to_rgb)
+    train_dataset = PASTISDataset(
+        data_path, train_folds,
+        dataset_fraction=fraction, cloud_drop_rate=cloud_rate, to_rgb=to_rgb,
+    )
+    val_dataset = PASTISDataset(
+        data_path, [val_fold],
+        dataset_fraction=1.0, cloud_drop_rate=0.0, to_rgb=to_rgb,
+    )
+    test_dataset = PASTISDataset(
+        data_path, [test_fold],
+        dataset_fraction=1.0, cloud_drop_rate=cloud_rate, to_rgb=to_rgb,
+    )
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    if ddp:
+        train_sampler = DistributedSampler(
+            train_dataset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True,
+        )
+        val_sampler = DistributedSampler(
+            val_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False,
+        )
+        test_sampler = DistributedSampler(
+            test_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False,
+        )
+        train_shuffle = False
+    else:
+        train_sampler = val_sampler = test_sampler = None
+        train_shuffle = True
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        sampler=val_sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        sampler=test_sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
 
     return train_loader, val_loader, test_loader
