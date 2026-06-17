@@ -24,5 +24,5 @@ training:
   lr_patience: 15
   stp_patience: 27
   checkpoint_dir: "/kaggle/working/ckpt"
-  log_dir: "/kaggle/working/log"
+  log_dir: "/kaggle/working/logs"
   class_weighting: true
