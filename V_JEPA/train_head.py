@@ -47,11 +47,10 @@ def is_main(rank: int) -> bool:
 def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     """
     Memory-safe encoder loading for large models under DDP.
- 
+
     Strategy
     --------
-    1. Rank 0 downloads the checkpoint to a known cache path on disk
-       (torch.hub.load_state_dict_from_url caches automatically).
+    1. Rank 0 downloads the checkpoint to a known cache path on disk.
     2. All ranks barrier — now the file is guaranteed to be on disk.
     3. Every rank builds the model with pretrained=False (cheap, no download),
        then loads the cached state dict directly onto its own GPU
@@ -61,40 +60,17 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
        build_vjepa2_1_encoder; we only need to load the base weights here.
     """
     from vjepa2.src.hub.backbones import ARCH_NAME_MAP, _clean_backbone_key
- 
+
     backbone_name = cfg["model"]["backbone"]
     is_rgb = cfg["data"].get("to_rgb", False)
- 
+
     VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
     model_file = ARCH_NAME_MAP[backbone_name][-1]
     url = VJEPA_BASE_URL + f"/{model_file}.pt"
- 
-    if is_main(rank):
-        log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
-        raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
-        ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
-        encoder_cache = ckpt_dir / f"encoder_weights_{model_file}.pt"
-        if not encoder_cache.exists():
-            encoder_sd = _clean_backbone_key(raw["ema_encoder"])
-            torch.save(encoder_sd, encoder_cache)
-            log.info(f"[rank 0] Encoder state dict cached to {encoder_cache}")
-        else:
-            log.info(f"[rank 0] Using existing encoder cache {encoder_cache}")
-        del raw
-        torch.cuda.empty_cache()
- 
-    dist.barrier()
- 
+
     ckpt_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
     encoder_cache = ckpt_dir / f"encoder_weights_{model_file}.pt"
- 
-    encoder = build_vjepa2_1_encoder(
-        model_name=backbone_name,
-        is_rgb=is_rgb,
-        pretrained=False,
-    )
- 
+
     _CHECKPOINT_KEY_MAP = {
         "vjepa2_1_vit_base_384":     "ema_encoder",
         "vjepa2_1_vit_large_384":    "ema_encoder",
@@ -102,18 +78,45 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         "vjepa2_1_vit_gigantic_384": "target_encoder",
     }
     checkpoint_key = _CHECKPOINT_KEY_MAP[backbone_name]
-    encoder_sd = _clean_backbone_key(raw[checkpoint_key])
+
+    if is_main(rank):
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        if not encoder_cache.exists():
+            log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
+            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+            
+            encoder_sd = _clean_backbone_key(raw[checkpoint_key])
+            torch.save(encoder_sd, encoder_cache)
+            log.info(f"[rank 0] Encoder state dict cached to {encoder_cache}")
+            
+            del raw
+            del encoder_sd
+            torch.cuda.empty_cache()
+        else:
+            log.info(f"[rank 0] Using existing encoder cache {encoder_cache}")
+
+    dist.barrier()
+
+    encoder = build_vjepa2_1_encoder(
+        model_name=backbone_name,
+        is_rgb=is_rgb,
+        pretrained=False,
+    )
+
+    encoder_sd = torch.load(encoder_cache, map_location=device)
+    
     missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
     if is_main(rank) and (missing or unexpected):
         log.info(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
+    
     del encoder_sd
     torch.cuda.empty_cache()
- 
+
     encoder = encoder.to(device)
- 
+
     if is_main(rank):
         log.info(f"Backbone '{backbone_name}' loaded on all ranks.")
- 
+
     return encoder
 
 class TemporalMeanPool(nn.Module):
