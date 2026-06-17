@@ -17,7 +17,7 @@ training:
   num_classes: 20
   epochs: 100
   batch_size: 16
-  img_size: 384
+  img_size: 128
   hidden_dim: 512
   lr: 1.0e-3
   weight_decay: 1.0e-4
