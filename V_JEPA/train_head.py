@@ -38,7 +38,7 @@ def cleanup_ddp() -> None:
 def is_main(rank: int) -> bool:
     return rank == 0
 
-def load_encoder_and_predictor(cfg: dict, rank: int, device: torch.device):
+def load_encoder(cfg: dict, rank: int, device: torch.device):
     """
     Build encoder + predictor from backbones.py using the backbone name in cfg.
     Only rank 0 loads the model, then broadcasts to all ranks.
@@ -52,34 +52,34 @@ def load_encoder_and_predictor(cfg: dict, rank: int, device: torch.device):
     # All ranks create the model architecture (without weights)
     backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
     build_fn = getattr(backbones, backbone_name)
+
+    # All ranks build the architecture with empty weights (no pretrained load)
     encoder, predictor = build_fn(pretrained=False)
+    del predictor
     encoder = encoder.to(device)
-    predictor = predictor.to(device)
 
-    # Only rank 0 loads the pretrained weights
+    # Only rank 0 loads pretrained weights directly into the model
+    # No second model copy, no intermediate state dict object
     if rank == 0:
-        print(f"Loading backbone '{backbone_name}' via backbones.{backbone_name}() ...")
+        print(f"Loading backbone '{backbone_name}' ...")
         encoder_pretrained, predictor_pretrained = build_fn(pretrained=True)
-        encoder_state = encoder_pretrained.state_dict()
-        predictor_state = predictor_pretrained.state_dict()
-        print("Backbone loaded.")
-    else:
-        encoder_state = None
-        predictor_state = None
+        del predictor_pretrained
 
-    encoder_state_list = [encoder_state] if rank == 0 else [None]
-    predictor_state_list = [predictor_state] if rank == 0 else [None]
+        encoder.load_state_dict(encoder_pretrained.state_dict())
 
-    dist.broadcast_object_list(encoder_state_list, src=0)
-    dist.broadcast_object_list(predictor_state_list, src=0)
+        # Explicitly delete to free RAM immediately
+        del encoder_pretrained
+        print("Backbone loaded and temp copies freed.")
 
-    encoder_state = encoder_state_list[0]
-    predictor_state = predictor_state_list[0]
+    # Broadcast each parameter tensor directly (no pickle, no extra copy)
+    for param in encoder.parameters():
+        dist.broadcast(param.data, src=0)
 
-    encoder.load_state_dict(encoder_state)
-    predictor.load_state_dict(predictor_state)
+    # Don't forget buffers (BatchNorm running stats, positional embeddings, etc.)
+    for buf in encoder.buffers():
+        dist.broadcast(buf, src=0)
 
-    return encoder, predictor
+    return encoder
 
 class TemporalMeanPool(nn.Module):
     """Mean-pool 3D video patch tokens over valid (non-padded) temporal patches."""
@@ -265,7 +265,7 @@ def train(cfg: dict) -> nn.Module:
     main = is_main(rank)
 
     # Load encoder and predictor on the correct GPU
-    encoder, _ = load_encoder_and_predictor(cfg, rank, device)
+    encoder = load_encoder(cfg, rank, device)
 
     if main:
         print(f"DDP active: {world_size} GPUs")
