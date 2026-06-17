@@ -11,7 +11,7 @@ ablation:
   cloud_drop_rate: 0.0
 
 model:
-  backbone: vjepa2_1_vit_base_384
+  backbone: vjepa2_1_vit_gigantic_384
 
 training:
   num_classes: 20
