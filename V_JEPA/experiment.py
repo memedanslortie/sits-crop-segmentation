@@ -38,29 +38,28 @@ class Experiment:
     config: dict
 
 def build_experiments(
-    config_path: str = "config.yaml",
-    experiments_path: str = "experiments.yaml",
+    config_path: str | Path = "config.yaml",
+    experiments_path: str | Path = "experiments.yaml",
 ) -> list[Experiment]:
 
     base_cfg = load_yaml(config_path)
     spec = load_yaml(experiments_path)
 
+    if not spec:
+        raise ValueError(f"experiments.yaml at '{experiments_path}' is empty or invalid.")
+
     experiments: list[Experiment] = []
 
     for group_name, group in spec.items():
-
         keys = list(group.keys())
         values_list = [group[k] for k in keys]
 
         for combo in product(*values_list):
-
             cfg = deepcopy(base_cfg)
-
             parts = []
 
             for k, v in zip(keys, combo):
                 set_nested(cfg, k, v)
-
                 short = k.split(".")[-1]
                 parts.append(f"{short}={v}")
 

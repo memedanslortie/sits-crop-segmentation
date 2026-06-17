@@ -257,11 +257,11 @@ def _one_epoch(
     return out
 
 
-def train(cfg: dict) -> nn.Module:
+def train(cfg: dict, rank, world_size, device) -> nn.Module:
     from utils.load_data import get_pastis_dataloaders
 
     # DDP init
-    rank, world_size, device = setup_ddp()
+    # rank, world_size, device = setup_ddp()
     main = is_main(rank)
 
     # Load encoder and predictor on the correct GPU
@@ -447,5 +447,5 @@ def train(cfg: dict) -> nn.Module:
     if main:
         print(f"Best val loss {best_val_loss:.4f} -> {best_ckpt}")
 
-    cleanup_ddp()
+    # cleanup_ddp()
     return _unwrap(head)
