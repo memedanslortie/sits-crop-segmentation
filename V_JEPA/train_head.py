@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from utils.metrics import SITS_Evaluator
+from custom_build import build_vjepa2_1_encoder
 
 def setup_ddp() -> tuple[int, int, torch.device]:
     """Initialise the process group and return (rank, world_size, device)."""
@@ -44,38 +45,26 @@ def load_encoder(cfg: dict, rank: int, device: torch.device):
     Only rank 0 loads the model, then broadcasts to all ranks.
     """
     backbone_name = cfg["model"]["backbone"]
-    if backbone_name is None:
-        raise ValueError(
-            f"Unknown backbone '{backbone_name}'. "
+
+    encoder = build_vjepa2_1_encoder(
+            model_name=backbone_name,
+            is_rgb=cfg["data"].get("to_rgb", False),
+            pretrained=False,
         )
-
-    # All ranks create the model architecture (without weights)
-    backbones = importlib.import_module(".backbones", "vjepa2.src.hub")
-    build_fn = getattr(backbones, backbone_name)
-
-    # All ranks build the architecture with empty weights (no pretrained load)
-    encoder, predictor = build_fn(pretrained=False)
-    del predictor
     encoder = encoder.to(device)
 
-    # Only rank 0 loads pretrained weights directly into the model
-    # No second model copy, no intermediate state dict object
     if rank == 0:
         print(f"Loading backbone '{backbone_name}' ...")
-        encoder_pretrained, predictor_pretrained = build_fn(pretrained=True)
-        del predictor_pretrained
+        encoder_pretrained = build_vjepa2_1_encoder(pretrained=True)
 
         encoder.load_state_dict(encoder_pretrained.state_dict())
 
-        # Explicitly delete to free RAM immediately
         del encoder_pretrained
         print("Backbone loaded and temp copies freed.")
 
-    # Broadcast each parameter tensor directly (no pickle, no extra copy)
     for param in encoder.parameters():
         dist.broadcast(param.data, src=0)
 
-    # Don't forget buffers (BatchNorm running stats, positional embeddings, etc.)
     for buf in encoder.buffers():
         dist.broadcast(buf, src=0)
 
@@ -183,19 +172,15 @@ def _apply_lora(encoder: nn.Module, lora_cfg: dict) -> nn.Module:
     return encoder
 
 
-def _encode_sits(encoder: nn.Module, x: torch.Tensor, img_size: int) -> torch.Tensor:
+def _encode_sits(encoder: nn.Module, x: torch.Tensor, img_size: int = 128) -> torch.Tensor:
     """Encode the full time series natively as a 3D video tensor."""
     B, T, C, H, W = x.shape
-    
-    # Safely interpolate spatially first to avoid smearing clouds/padding over time
-    if H != img_size or W != img_size:
-        x_flat = x.flatten(0, 1)                                        # (B*T, C, H, W)
-        x_flat = F.interpolate(x_flat, size=(img_size, img_size), mode="bilinear", align_corners=False)
-        x = x_flat.unflatten(0, (B, T))                                 # (B, T, C, H_new, W_new)
-        
-    # Transpose to V-JEPA expected format: (Batch, Channels, Time, Height, Width)
+
+    assert H == img_size and W == img_size, f"Input must be {img_size}x{img_size}, got {H}x{W}"
+
+    # Transpose to (B, C, T, H, W)
     video_tensor = x.permute(0, 2, 1, 3, 4)
-    return encoder(video_tensor)                                        # (B, L, D)
+    return encoder(video_tensor)  # (B, L, D)
 
 def _unwrap(model: nn.Module) -> nn.Module:
     """Return the underlying module, stripping DDP wrapper if present."""
@@ -279,7 +264,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     # Config
     num_classes: int = int(cfg.get("training", {}).get("num_classes", 20))
     noloss_classes: set[int] = set(cfg["data"]["noloss_classes"])
-    img_size: int = cfg["training"].get("img_size", 384)
+    img_size: int = cfg["training"].get("img_size", 128)
     lora_cfg: dict | None = cfg["training"].get("lora")
     lora_active = lora_cfg is not None
 
