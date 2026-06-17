@@ -15,6 +15,10 @@ from peft import LoraConfig, get_peft_model
 from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from utils.metrics import SITS_Evaluator
 
 
