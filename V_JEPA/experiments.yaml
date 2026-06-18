@@ -3,7 +3,7 @@ adaptation_comparison:
     - false
     - true
   training.lora:
-    - rank: 8
+    - rank: 16
       alpha: 8.0
       lr: 2.0e-4
       merge_after_training: false
