@@ -83,7 +83,7 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         if not encoder_cache.exists():
             log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
-            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
             
             encoder_sd = _clean_backbone_key(raw[checkpoint_key])
             torch.save(encoder_sd, encoder_cache)

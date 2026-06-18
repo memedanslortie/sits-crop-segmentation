@@ -1,14 +1,14 @@
-adaptation_comparison:
-  data.to_rgb: 
-    - true
-    - false
-  training.lora:
-    - rank: 4
-      alpha: 8.0
-      lr: 2.0e-4
-      merge_after_training: false
-      patience_mlt: 3
-    - null
+# adaptation_comparison:
+#   data.to_rgb: 
+#     - true
+#     - false
+#   training.lora:
+#     - rank: 4
+#       alpha: 8.0
+#       lr: 2.0e-4
+#       merge_after_training: false
+#       patience_mlt: 2
+#     - null
 
 dataset_scaling:
   data.to_rgb: [false]
@@ -16,14 +16,19 @@ dataset_scaling:
   training.lora:
     - rank: 4
       alpha: 8.0
+      lr: 2.0e-3
+      merge_after_training: false
+      patience_mlt: 2
+
+cloud_ablation:
+  data.to_rgb: [false]
+  ablation.cloud_drop_rate: [0.0, 0.5, 1.0]
+  training.lora:
+    - rank: 4
+      alpha: 8.0
       lr: 2.0e-4
       merge_after_training: false
-      patience_mlt: 3
-    - null
-
-# cloud_ablation:
-#   data.to_rgb: [false]
-#   ablation.cloud_drop_rate: [0.0, 0.5, 1.0]
+      patience_mlt: 2
 
 # adaptation_vs_data:
 #   data.to_rgb: [false]

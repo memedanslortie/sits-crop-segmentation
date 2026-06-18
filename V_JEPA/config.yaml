@@ -15,14 +15,14 @@ model:
 
 training:
   num_classes: 20
-  epochs: 100
+  epochs: 75
   batch_size: 8
   img_size: 128
   hidden_dim: 512
-  lr: 1.0e-3
+  lr: 1.0e-2
   weight_decay: 1.0e-4
   lr_patience: 8
-  stp_patience: 17
+  stp_patience: 12
   checkpoint_dir: /kaggle/working/SITS-Classification/data/ckpt
   log_dir: "/kaggle/working/SITS-Classification/data/logs"
   class_weighting: true
