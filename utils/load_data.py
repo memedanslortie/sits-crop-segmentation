@@ -4,8 +4,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
+from utils.logging import get_logger
+log = get_logger()
 
 class PASTISDataset(Dataset):
     """PASTIS-HD Sentinel-2 time series dataset with optional subsampling and cloud simulation."""
@@ -44,13 +46,13 @@ class PASTISDataset(Dataset):
             rng.shuffle(patch_ids)
             keep_count = int(len(patch_ids) * dataset_fraction)
             self.patch_ids = patch_ids[:keep_count]
-            print(
+            log.info(
                 f"Data Efficiency [{dataset_fraction:.0%}]: kept {len(self.patch_ids)}/{len(patch_ids)} "
                 f"patches (seed={seed})."
             )
         else:
             self.patch_ids = patch_ids
-            print(f"Loaded folds {target_folds}: {len(self.patch_ids)} patches.")
+            log.info(f"Loaded folds {target_folds}: {len(self.patch_ids)} patches.")
 
         if self.norm:
             with open(self.data_path / "NORM_S2_patch.json") as f:
@@ -77,8 +79,6 @@ class PASTISDataset(Dataset):
         patch_id = self.patch_ids[idx]
 
         x = torch.from_numpy(np.load(self.data_path / "DATA_S2" / f"S2_{patch_id}.npy")).float()
-        if self.norm:
-            x = (x - self.mean) / self.std
 
         y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
 
@@ -92,7 +92,7 @@ class PASTISDataset(Dataset):
                 x[cloud_indices] = 0.0
                 cloud_mask[cloud_indices] = True
 
-        # Pad or truncate to a fixed temporal length; mask is True for padding OR simulated clouds.
+        # Pad or truncate to max_seq_len
         if valid_seq_len < self.max_seq_len:
             pad_size = self.max_seq_len - valid_seq_len
             x = torch.cat([x, torch.zeros((pad_size, *x.shape[1:]), dtype=x.dtype)], dim=0)
@@ -101,8 +101,18 @@ class PASTISDataset(Dataset):
             x = x[: self.max_seq_len]
             mask = cloud_mask[: self.max_seq_len]
 
-        # x: [max_seq_len, 10, 128, 128], y: [128, 128], mask: [max_seq_len]
         return x, y, mask
+
+    def label_counts(self, num_classes: int) -> torch.Tensor:
+        """Pixel count per class over this split. Reads ONLY the small TARGET files
+        (not the heavy S2 time series), so it is cheap to call once before training."""
+        counts = torch.zeros(num_classes, dtype=torch.float64)
+        for pid in self.patch_ids:
+            y = np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{pid}.npy")[0]
+            counts += torch.bincount(
+                torch.from_numpy(y).long().flatten(), minlength=num_classes
+            ).double()
+        return counts
 
 
 def get_pastis_dataloaders(
@@ -119,6 +129,8 @@ def get_pastis_dataloaders(
     evaluated on 100% clean data, and test optionally inherits `cloud_rate` for
     cloud-robustness evaluation.
     """
+    ddp = rank is not None and world_size is not None
+
     all_folds = [1, 2, 3, 4, 5]
     test_fold = run_fold
     val_fold = 5 if test_fold == 1 else test_fold - 1

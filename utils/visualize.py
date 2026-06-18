@@ -29,7 +29,7 @@ def sentinel2_normalize(x):
     x = np.clip(x, 0, 10000)  # standard S2 reflectance scaling
     return x / 10000.0
 
-def to_rgb(frame):
+def build_rgb(frame):
     # frame: (10, H, W)
 
     r = frame[3]

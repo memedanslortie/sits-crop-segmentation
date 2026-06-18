@@ -2,7 +2,9 @@ import os
 import json
 import torch
 import numpy as np
-from sklearn.metrics import confusion_matrix
+
+from utils.logging import get_logger
+log = get_logger()
 
 # PASTIS official class names (0-19) based on official documentation.
 PASTIS_CLASSES = {
@@ -33,44 +35,71 @@ class SITS_Evaluator:
         if ignore_indices is None:
             ignore_indices = [19]  # U-TAE protocol: ignore ONLY void; background(0) is scored
         self.num_classes = num_classes
-        self.ignore_indices = ignore_indices
+        self.ignore_indices = set(ignore_indices or [19])
+
+        self.device = device if device is not None else torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+
         self.reset()
 
     def reset(self):
-        """Resets the confusion matrix for a new epoch/evaluation."""
-        self.conf_matrix = np.zeros((self.num_classes, self.num_classes), dtype=np.int64)
+        """GPU confusion matrix accumulator (flat bincount form)."""
+        self.conf_matrix = torch.zeros(
+            (self.num_classes, self.num_classes),
+            dtype=torch.long,
+            device=self.device,
+        )
 
+    @torch.no_grad()
     def add_batch(self, predictions, targets):
         """
-        Updates the confusion matrix with a new batch.
+        GPU-optimized accumulation using torch.bincount.
+        No sklearn, no CPU roundtrip per batch.
         """
-        # Flatten tensors to 1D arrays
-        preds = predictions.cpu().numpy().flatten()
-        targs = targets.cpu().numpy().flatten()
 
-        mask = ~np.isin(targs, self.ignore_indices)
-        preds = preds[mask]
-        targs = targs[mask]
+        preds = predictions.to(self.device).flatten().long()
+        targs = targets.to(self.device).flatten().long()
 
-        # Update confusion matrix securely
-        if len(targs) > 0:
-            self.conf_matrix += confusion_matrix(
-                targs, preds, labels=np.arange(self.num_classes)
-            )
+        # Build valid mask (exclude ignore classes)
+        if len(self.ignore_indices) > 0:
+            mask = torch.ones_like(targs, dtype=torch.bool)
+            for ign in self.ignore_indices:
+                mask &= (targs != ign)
+
+            preds = preds[mask]
+            targs = targs[mask]
+
+        if preds.numel() == 0:
+            return
+
+        # Flat index: (pred * C + target)
+        idx = preds * self.num_classes + targs
+
+        bincount = torch.bincount(
+            idx,
+            minlength=self.num_classes * self.num_classes,
+        )
+
+        cm = bincount.reshape(self.num_classes, self.num_classes)
+
+        self.conf_matrix += cm
 
     def compute_metrics(self):
-        """Computes OA, mIoU, and Macro-F1 from the confusion matrix."""
-        valid_classes = [i for i in range(self.num_classes) if i not in self.ignore_indices]
-        
-        # Isolate valid classes
-        cm = self.conf_matrix[valid_classes][:, valid_classes]
+        """CPU metrics computation (unchanged logic, now faster pipeline)."""
 
-        # Calculate True Positives, False Positives, False Negatives
+        cm = self.conf_matrix.detach().cpu().numpy()
+
+        valid_classes = [
+            i for i in range(self.num_classes) if i not in self.ignore_indices
+        ]
+
+        cm = cm[np.ix_(valid_classes, valid_classes)]
+
         TP = np.diag(cm)
         FP = cm.sum(axis=0) - TP
         FN = cm.sum(axis=1) - TP
 
-        # Pixel Accuracy (Standard but biased)
         overall_accuracy = np.sum(TP) / (np.sum(cm) + 1e-10)
 
         # Ground-truth support per class. Classes ABSENT from this fold are undefined and
@@ -94,41 +123,43 @@ class SITS_Evaluator:
         )
         macro_f1 = float(np.nanmean(f1_per_class)) if np.any(support > 0) else 0.0
 
-        # Package results into a clean dictionary
         results = {
             "Overall_Accuracy": round(float(overall_accuracy), 4),
             "mIoU": round(float(mIoU), 4),
             "Macro_F1": round(float(macro_f1), 4),
+
             "Per_Class_IoU": {
                 PASTIS_CLASSES.get(c, f"Class_{c}"): (
                     None if np.isnan(iou_per_class[idx]) else round(float(iou_per_class[idx]), 4)
                 )
                 for idx, c in enumerate(valid_classes)
             },
+
             "Per_Class_F1": {
                 PASTIS_CLASSES.get(c, f"Class_{c}"): (
                     None if np.isnan(f1_per_class[idx]) else round(float(f1_per_class[idx]), 4)
                 )
                 for idx, c in enumerate(valid_classes)
             },
-            "Confusion_Matrix_Raw": self.conf_matrix.tolist()
+
+            "Confusion_Matrix_Raw": cm.tolist(),
         }
+
         return results
 
     def save_results(self, filepath):
-        """Computes metrics and exports them to a highly readable JSON file."""
         results = self.compute_metrics()
-        
-        # Ensure directory exists ONLY if a directory is specified in the path
+
         dirname = os.path.dirname(filepath)
-        if dirname: 
+        if dirname:
             os.makedirs(dirname, exist_ok=True)
-        
-        # Save as JSON
-        with open(filepath, 'w') as f:
+
+        with open(filepath, "w") as f:
             json.dump(results, f, indent=4)
-            
-        print(f"✅ Evaluation complete. Results saved perfectly to: {filepath}")
-        print(f"📊 Quick Recap -> mIoU: {results['mIoU']:.4f} | Macro F1: {results['Macro_F1']:.4f}")
-        
+
+        log.info(f"✅ Evaluation complete → {filepath}")
+        log.info(
+            f"📊 mIoU: {results['mIoU']:.4f} | Macro F1: {results['Macro_F1']:.4f}"
+        )
+
         return results
