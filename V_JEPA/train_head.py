@@ -430,7 +430,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     suffix = "lora" if lora_active else "frozen"
     best_ckpt = ckpt_dir / f"best_{suffix}_fold{cfg['run_fold']}.pt"
-    best_val_loss = -1.0
+    best_val_loss = float('inf') 
 
     # Training loop
     n_epochs: int = cfg["training"]["epochs"]
@@ -461,7 +461,12 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             evaluator=evaluator,
         )
 
-        val_loss = val_m['loss']
+        val_loss_tensor = torch.tensor(val_m['loss'], device=device)
+        if dist.is_initialized():
+            dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
+            val_loss_tensor /= world_size
+        
+        val_loss = val_loss_tensor.item()
 
         scheduler.step(val_loss)
 
@@ -473,7 +478,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             log.info(
                 f"[Fold {cfg['run_fold']} | {epoch:03d}/{n_epochs}]  "
                 f"train loss={train_m['loss']:.4f} | "
-                f"val loss={val_m['loss']:.4f}{'*' if improved else ' '} | "
+                f"val loss={val_loss:.4f}{'*' if improved else ' '} | "
                 f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
                 f"mIoU={val_m['mIoU']:.4f} | "
                 f"F1={val_m.get('Macro_F1', 0):.4f}  "
@@ -491,10 +496,13 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
 
         # broadcast improved flag so early stopping is consistent
         improved_tensor = torch.tensor(int(improved), device=device)
-        dist.broadcast(improved_tensor, src=0)
+        if dist.is_initialized():
+            dist.broadcast(improved_tensor, src=0)
+            
         epochs_since_improve = 0 if improved_tensor.item() else epochs_since_improve + 1
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
         if epochs_since_improve >= _stp_patience:
             if main:
