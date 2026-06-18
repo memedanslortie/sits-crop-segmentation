@@ -21,8 +21,8 @@ training:
   hidden_dim: 512
   lr: 1.0e-3
   weight_decay: 1.0e-4
-  lr_patience: 15
-  stp_patience: 27
-  checkpoint_dir: "/kaggle/working/ckpt"
-  log_dir: "/kaggle/working/logs"
+  lr_patience: 8
+  stp_patience: 17
+  checkpoint_dir: /kaggle/working/SITS-Classification/data/ckpt
+  log_dir: "/kaggle/working/SITS-Classification/data/logs"
   class_weighting: true

@@ -6,7 +6,7 @@ def make_video(patch, out_path="s2_rgb.mp4", fps=5, gamma=1):
 
     frames = []
     for t in range(T):
-        rgb = to_rgb(patch[t])
+        rgb = build_rgb(patch[t])
         rgb_uint8 = (rgb**gamma * 255).astype(np.uint8)
         frames.append(rgb_uint8)
 

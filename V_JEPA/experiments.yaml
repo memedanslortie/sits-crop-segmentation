@@ -1,5 +1,3 @@
-default: {}
-
 adaptation_comparison:
   data.to_rgb: 
     - true
