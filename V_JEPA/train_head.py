@@ -83,7 +83,7 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         if not encoder_cache.exists():
             log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
-            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
             
             encoder_sd = _clean_backbone_key(raw[checkpoint_key])
             torch.save(encoder_sd, encoder_cache)
@@ -217,6 +217,8 @@ def _apply_lora(encoder: nn.Module, lora_cfg: dict) -> nn.Module:
         # task_type="FEATURE_EXTRACTION",
     )
     encoder = get_peft_model(encoder, config)
+    encoder.enable_input_require_grads()
+    encoder.gradient_checkpointing_enable()
     encoder.print_trainable_parameters()
     return encoder
 
@@ -344,6 +346,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
         for p in encoder.parameters():
             p.requires_grad_(False)
         encoder.eval()
+        # encoder.gradient_checkpointing_enable()
 
     # Wrap encoder in DDP only when it has trainable params (LoRA).
     if lora_active:
