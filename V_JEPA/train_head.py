@@ -214,7 +214,7 @@ def _apply_lora(encoder: nn.Module, lora_cfg: dict) -> nn.Module:
         target_modules=["qkv", "proj"],
         lora_dropout=lora_cfg.get("dropout", 0.0),
         bias="none",
-        task_type="FEATURE_EXTRACTION",
+        # task_type="FEATURE_EXTRACTION",
     )
     encoder = get_peft_model(encoder, config)
     encoder.print_trainable_parameters()
