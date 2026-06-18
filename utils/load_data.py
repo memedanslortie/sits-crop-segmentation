@@ -19,13 +19,11 @@ class PASTISDataset(Dataset):
         seed: int = 42,
         cloud_drop_rate: float = 0.0,
         norm: bool = True,
-        to_rgb: bool = False,
     ):
         self.data_path = Path(data_path)
         self.max_seq_len = max_seq_len
         self.cloud_drop_rate = cloud_drop_rate
         self.norm = norm
-        self.to_rgb = to_rgb
 
         metadata_path = self.data_path / "metadata.geojson"
         with open(metadata_path) as f:
@@ -64,16 +62,23 @@ class PASTISDataset(Dataset):
     def __len__(self) -> int:
         return len(self.patch_ids)
 
+    def label_counts(self, num_classes: int) -> torch.Tensor:
+        """Pixel count per class over this split. Reads ONLY the small TARGET files
+        (not the heavy S2 time series), so it is cheap to call once before training."""
+        counts = torch.zeros(num_classes, dtype=torch.float64)
+        for pid in self.patch_ids:
+            y = np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{pid}.npy")[0]
+            counts += torch.bincount(
+                torch.from_numpy(y).long().flatten(), minlength=num_classes
+            ).double()
+        return counts
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         patch_id = self.patch_ids[idx]
 
         x = torch.from_numpy(np.load(self.data_path / "DATA_S2" / f"S2_{patch_id}.npy")).float()
         if self.norm:
             x = (x - self.mean) / self.std
-
-        if self.to_rgb:
-            # Sentinel-2 RGB = B4, B3, B2
-            x = x[:, [3, 2, 1], :, :]
 
         y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
 
@@ -107,7 +112,6 @@ def get_pastis_dataloaders(
     run_fold: int = 1,
     fraction: float = 1.0,
     cloud_rate: float = 0.0,
-    to_rgb: bool = False,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Build train/val/test loaders following the PASTIS 5-fold cross-validation protocol.
 
@@ -126,7 +130,9 @@ def get_pastis_dataloaders(
     val_dataset = PASTISDataset(data_path, [val_fold], dataset_fraction=1.0, cloud_drop_rate=0.0)
     test_dataset = PASTISDataset(data_path, [test_fold], dataset_fraction=1.0, cloud_drop_rate=cloud_rate)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    # drop_last=True: avoids a final batch of size 1, which crashes nn.DataParallel on
+    # multi-GPU (a 1-sample batch cannot be split across GPUs -> NCCL broadcast error).
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
