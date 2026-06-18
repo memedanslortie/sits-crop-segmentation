@@ -124,7 +124,13 @@ def evaluate(cfg: dict, rank: int, world_size: int, device: torch.device, ckpt_p
     if main:
         results_dir = Path(cfg["training"].get("checkpoint_dir", "./checkpoints"))
         suffix = "lora" if lora_active else "frozen"
-        results_file = results_dir / f"test_metrics_{suffix}_fold{cfg['run_fold']}.json"
+        modality = "rgb" if cfg["data"].get("to_rgb", False) else "multi"
+        frac = cfg["ablation"].get("dataset_fraction", 1.0)
+        cloud = cfg["ablation"].get("cloud_drop_rate", 0.0)
+        fold = cfg['run_fold']
+        
+        unique_id = f"{suffix}_{modality}_frac{frac}_cloud{cloud}_fold{fold}"
+        results_file = results_dir / f"test_metrics_{unique_id}.json"
         
         # Save JSON to disk and print to terminal
         metrics = evaluator.save_results(results_file)

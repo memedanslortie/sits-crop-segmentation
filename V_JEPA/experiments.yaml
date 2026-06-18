@@ -1,6 +1,17 @@
-adaptation_comparison:
+# adaptation_comparison:
+#   data.to_rgb: 
+#     - false
+#     - true
+#   training.lora:
+#     - rank: 16
+#       alpha: 8.0
+#       lr: 2.0e-4
+#       merge_after_training: false
+#       patience_mlt: 2
+#     - null
+
+lora_base_rgb:
   data.to_rgb: 
-    - false
     - true
   training.lora:
     - rank: 16
@@ -9,6 +20,23 @@ adaptation_comparison:
       merge_after_training: false
       patience_mlt: 2
     - null
+
+base_10bands:
+  data.to_rgb: 
+    - false
+  training.lora:
+    - null
+
+lora_10bands_end:
+  run_fold: [2, 3, 4, 5]
+  data.to_rgb: 
+    - true
+  training.lora:
+    - rank: 16
+      alpha: 8.0
+      lr: 2.0e-4
+      merge_after_training: false
+      patience_mlt: 2
 
 # dataset_scaling:
 #   data.to_rgb: [false]
