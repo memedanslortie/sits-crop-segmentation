@@ -13,7 +13,7 @@ def setup_logger(rank: int, log_dir: Path | None = None, run_name: str = "run") 
     logger.handlers.clear()
 
     fmt = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(message)s",
+        fmt="%(levelname)-8s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
