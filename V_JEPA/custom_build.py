@@ -35,15 +35,17 @@ def build_vjepa2_1_encoder(
         VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
         model_file = ARCH_NAME_MAP[model_name][-1]
         url = VJEPA_BASE_URL + f"/{model_file}.pt"
-        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
+        log.info("Start loading pretrained")
+        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
 
         checkpoint_key = _CHECKPOINT_KEY_MAP[model_name]
         encoder_state_dict = _clean_backbone_key(state_dict[checkpoint_key])
 
         # Load weights, ignoring size mismatches (pos_embed is handled by RoPE)
         encoder.load_state_dict(encoder_state_dict, strict=False)
-        # log.info("Loaded pretrained weights (ignoring size mismatches).")
+        log.info("Loaded pretrained weights.")
         if not is_rgb:
+            log.info("Addapt 1st layer for 10 bands")
             # Replace the first layer of the patch embedding to accept `in_chans`
             # The patch_embed is a PatchEmbed3D module
             old_patch_embed = encoder.patch_embed
