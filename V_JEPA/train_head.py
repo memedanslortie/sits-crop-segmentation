@@ -56,8 +56,11 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
        then loads the cached state dict directly onto its own GPU
        with map_location=device.  Peak extra RAM = one state dict on CPU
        per rank (loaded and freed immediately), never two full GPU copies.
-    4. The patch-embed is replaced for multi-spectral input inside
-       build_vjepa2_1_encoder; we only need to load the base weights here.
+    4. patch_embed keys are stripped before loading because build_vjepa2_1_encoder
+       already initialises the 10-channel proj correctly (3 RGB channels
+       warm-started, remaining 7 kaiming-initialised). strict=False skips
+       missing/extra keys but still errors on size mismatches, so we must
+       remove them manually.
     """
     from vjepa2.src.hub.backbones import ARCH_NAME_MAP, _clean_backbone_key
 
@@ -84,11 +87,9 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         if not encoder_cache.exists():
             log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
             raw = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
-            
             encoder_sd = _clean_backbone_key(raw[checkpoint_key])
             torch.save(encoder_sd, encoder_cache)
             log.info(f"[rank 0] Encoder state dict cached to {encoder_cache}")
-            
             del raw
             del encoder_sd
             torch.cuda.empty_cache()
@@ -104,6 +105,16 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     )
 
     encoder_sd = torch.load(encoder_cache, map_location=device)
+
+    # Strip patch_embed keys: build_vjepa2_1_encoder already initialised the
+    # 10-channel proj correctly. strict=False does NOT skip size mismatches
+    # (only missing/extra keys), so we must remove them explicitly.
+    if not is_rgb:
+        patch_embed_keys = [k for k in encoder_sd if k.startswith("patch_embed")]
+        for k in patch_embed_keys:
+            del encoder_sd[k]
+        if is_main(rank):
+            log.info(f"[rank 0] Stripped {len(patch_embed_keys)} patch_embed keys from checkpoint.")
     
     missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
     if is_main(rank) and (missing or unexpected):
