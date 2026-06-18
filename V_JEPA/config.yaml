@@ -16,7 +16,7 @@ model:
 training:
   num_classes: 20
   epochs: 100
-  batch_size: 16
+  batch_size: 8
   img_size: 128
   hidden_dim: 512
   lr: 1.0e-3
