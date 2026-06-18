@@ -419,7 +419,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     suffix = "lora" if lora_active else "frozen"
     best_ckpt = ckpt_dir / f"best_{suffix}_fold{cfg['run_fold']}.pt"
-    best_val_miou = -1.0
+    best_val_loss = -1.0
 
     # Training loop
     n_epochs: int = cfg["training"]["epochs"]
@@ -450,13 +450,13 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             evaluator=evaluator,
         )
 
-        val_miou = val_m["mIoU"]
+        val_loss = val_m['loss']
 
-        scheduler.step(val_miou)
+        scheduler.step(val_loss)
 
-        improved = val_miou > best_val_miou
+        improved = val_loss > best_val_loss
         if improved:
-            best_val_miou = val_miou
+            best_val_loss = val_loss
 
         if main:
             log.info(
@@ -464,7 +464,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
                 f"train loss={train_m['loss']:.4f} | "
                 f"val loss={val_m['loss']:.4f} | "
                 f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
-                f"mIoU={val_miou:.4f}{'*' if improved else ' '} | "
+                f"mIoU={val_m['mIoU']:.4f}{'*' if improved else ' '} | "
                 f"F1={val_m.get('Macro_F1', 0):.4f}  "
                 f"({time.perf_counter() - t0:.1f}s)"
             )
@@ -487,7 +487,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
 
         if epochs_since_improve >= _stp_patience:
             if main:
-                log.info(f"Early stopping: no mIoU improvement for {_stp_patience} epochs.")
+                log.info(f"Early stopping: no loss improvement for {_stp_patience} epochs.")
             break
 
     # Restore best weights
@@ -500,7 +500,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             log.info("LoRA weights merged into encoder.")
 
     if main:
-        log.info(f"Best val mIoU {best_val_miou:.4f} -> {best_ckpt}")
+        log.info(f"Best val loss {best_val_loss:.4f} -> {best_ckpt}")
 
     # cleanup_ddp()
     return best_ckpt
