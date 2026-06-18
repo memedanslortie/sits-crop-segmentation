@@ -1,0 +1,31 @@
+experiment:
+  name: "TimeSformer_HIRES_LORA"    
+  seed: 42
+  run_fold: 1
+
+data:
+  dataset_path: "/kaggle/input/pastis-dataset"
+  max_seq_len: 60
+  in_channels: 10
+  num_classes: 20
+  ignore_classes: [19]           # U-TAE protocol: score background(0)+18 crops, ignore ONLY void(19)
+
+ablation:
+  dataset_fraction: 1.0
+  cloud_drop_rate: 0.0
+
+training:
+  batch_size: 8                  # 4 per T4 under DataParallel + AMP — proven to fit
+  num_epochs: 30                 # val mIoU plateaus by ~epoch 15-20; best-on-val ckpt keeps the peak
+  learning_rate: 0.0005          # fine for LoRA + newly-trainable input embeddings (10% cosine warmup absorbs the random-init position table)
+  weight_decay: 0.05
+  gradient_clipping: 1.0
+  loss_function: "dice_ce"
+  class_weighting: true           # median-frequency balancing so background(0) doesn't dominate the loss
+  class_weight_cap: 3.0           # cap on per-class weight (was effectively 10 → caused rare-class hallucination)
+
+model:
+  backbone: "facebook/timesformer-base-finetuned-k400"
+  use_lora: true
+  freeze_backbone: false
+  high_res_decoder: true            # progressive decoder + raw-input skip (vs single x16 bilinear upsample)

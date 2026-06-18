@@ -31,7 +31,9 @@ PASTIS_CLASSES = {
 }
 
 class SITS_Evaluator:
-    def __init__(self, num_classes=20, ignore_indices=None, device=None):
+    def __init__(self, num_classes=20, ignore_indices=None):
+        if ignore_indices is None:
+            ignore_indices = [19]  # U-TAE protocol: ignore ONLY void; background(0) is scored
         self.num_classes = num_classes
         self.ignore_indices = set(ignore_indices or [19])
 
@@ -100,24 +102,26 @@ class SITS_Evaluator:
 
         overall_accuracy = np.sum(TP) / (np.sum(cm) + 1e-10)
 
+        # Ground-truth support per class. Classes ABSENT from this fold are undefined and
+        # must be excluded (set to NaN) rather than scored as 0 — counting them as 0 would
+        # artificially deflate mIoU/F1 and break comparability with the U-TAE protocol,
+        # which averages only over classes present in the split.
         support = TP + FN
 
-        iou_per_class = np.where(
-            support > 0,
-            TP / np.maximum(TP + FP + FN, 1),
-            np.nan,
-        )
-        mIoU = np.nanmean(iou_per_class)
+        # Intersection over Union (IoU) per class & Mean IoU
+        iou_per_class = np.where(support > 0, TP / np.maximum(TP + FP + FN, 1), np.nan)
+        # Guard against an all-NaN slice (e.g. a single patch with no scored pixels)
+        mIoU = float(np.nanmean(iou_per_class)) if np.any(support > 0) else 0.0
 
+        # F1-Score per class & Macro F1
         precision = TP / np.maximum(TP + FP, 1)
         recall = TP / np.maximum(TP + FN, 1)
-
         f1_per_class = np.where(
             support > 0,
             2 * precision * recall / np.maximum(precision + recall, 1e-10),
             np.nan,
         )
-        macro_f1 = np.nanmean(f1_per_class)
+        macro_f1 = float(np.nanmean(f1_per_class)) if np.any(support > 0) else 0.0
 
         results = {
             "Overall_Accuracy": round(float(overall_accuracy), 4),
@@ -126,16 +130,16 @@ class SITS_Evaluator:
 
             "Per_Class_IoU": {
                 PASTIS_CLASSES.get(c, f"Class_{c}"): (
-                    None if np.isnan(iou_per_class[i]) else round(float(iou_per_class[i]), 4)
+                    None if np.isnan(iou_per_class[idx]) else round(float(iou_per_class[idx]), 4)
                 )
-                for i, c in enumerate(valid_classes)
+                for idx, c in enumerate(valid_classes)
             },
 
             "Per_Class_F1": {
                 PASTIS_CLASSES.get(c, f"Class_{c}"): (
-                    None if np.isnan(f1_per_class[i]) else round(float(f1_per_class[i]), 4)
+                    None if np.isnan(f1_per_class[idx]) else round(float(f1_per_class[idx]), 4)
                 )
-                for i, c in enumerate(valid_classes)
+                for idx, c in enumerate(valid_classes)
             },
 
             "Confusion_Matrix_Raw": cm.tolist(),

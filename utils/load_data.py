@@ -21,13 +21,11 @@ class PASTISDataset(Dataset):
         seed: int = 42,
         cloud_drop_rate: float = 0.0,
         norm: bool = True,
-        to_rgb: bool = False,
     ):
         self.data_path = Path(data_path)
         self.max_seq_len = max_seq_len
         self.cloud_drop_rate = cloud_drop_rate
         self.norm = norm
-        self.to_rgb = to_rgb
 
         metadata_path = self.data_path / "metadata.geojson"
         with open(metadata_path) as f:
@@ -66,29 +64,23 @@ class PASTISDataset(Dataset):
     def __len__(self) -> int:
         return len(self.patch_ids)
 
+    def label_counts(self, num_classes: int) -> torch.Tensor:
+        """Pixel count per class over this split. Reads ONLY the small TARGET files
+        (not the heavy S2 time series), so it is cheap to call once before training."""
+        counts = torch.zeros(num_classes, dtype=torch.float64)
+        for pid in self.patch_ids:
+            y = np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{pid}.npy")[0]
+            counts += torch.bincount(
+                torch.from_numpy(y).long().flatten(), minlength=num_classes
+            ).double()
+        return counts
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         patch_id = self.patch_ids[idx]
 
         x = torch.from_numpy(np.load(self.data_path / "DATA_S2" / f"S2_{patch_id}.npy")).float()
 
-        # Apply RGB conversion FIRST (if enabled)
-        if self.to_rgb:
-            # Sentinel-2 RGB = B4, B3, B2 (indices 3, 2, 1)
-            x = x[:, [3, 2, 1], :, :]  # Now shape: (T, 3, H, W)
-
-        # Then normalize (using RGB-specific stats if to_rgb=True)
-        if self.norm:
-            if self.to_rgb:
-                # Select RGB channels from mean/std (shape: (1, 10, 1, 1) -> (1, 3, 1, 1))
-                rgb_mean = self.mean[:, [3, 2, 1], :, :]
-                rgb_std = self.std[:, [3, 2, 1], :, :]
-                x = (x - rgb_mean) / rgb_std
-            else:
-                x = (x - self.mean) / self.std
-
-        y = torch.from_numpy(
-            np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]
-        ).long()
+        y = torch.from_numpy(np.load(self.data_path / "ANNOTATIONS" / f"TARGET_{patch_id}.npy")[0]).long()
 
         valid_seq_len = x.shape[0]
         cloud_mask = torch.zeros(valid_seq_len, dtype=torch.bool)
@@ -130,9 +122,6 @@ def get_pastis_dataloaders(
     run_fold: int = 1,
     fraction: float = 1.0,
     cloud_rate: float = 0.0,
-    to_rgb: bool = False,
-    rank: int | None = None,
-    world_size: int | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Build train/val/test loaders following the PASTIS 5-fold cross-validation protocol.
 
@@ -147,61 +136,16 @@ def get_pastis_dataloaders(
     val_fold = 5 if test_fold == 1 else test_fold - 1
     train_folds = [f for f in all_folds if f not in (val_fold, test_fold)]
 
-    log.info(
-        f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} | DDP: {ddp} ---"
-    )
+    print(f"--- Init dataloaders | test fold: {test_fold} | fraction: {fraction} | cloud rate: {cloud_rate} ---")
 
-    train_dataset = PASTISDataset(
-        data_path, train_folds,
-        dataset_fraction=fraction, cloud_drop_rate=cloud_rate, to_rgb=to_rgb,
-    )
-    val_dataset = PASTISDataset(
-        data_path, [val_fold],
-        dataset_fraction=1.0, cloud_drop_rate=0.0, to_rgb=to_rgb,
-    )
-    test_dataset = PASTISDataset(
-        data_path, [test_fold],
-        dataset_fraction=1.0, cloud_drop_rate=cloud_rate, to_rgb=to_rgb,
-    )
+    train_dataset = PASTISDataset(data_path, train_folds, dataset_fraction=fraction, cloud_drop_rate=cloud_rate)
+    val_dataset = PASTISDataset(data_path, [val_fold], dataset_fraction=1.0, cloud_drop_rate=0.0)
+    test_dataset = PASTISDataset(data_path, [test_fold], dataset_fraction=1.0, cloud_drop_rate=cloud_rate)
 
-    if ddp:
-        train_sampler = DistributedSampler(
-            train_dataset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True,
-        )
-        val_sampler = DistributedSampler(
-            val_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False,
-        )
-        test_sampler = DistributedSampler(
-            test_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False,
-        )
-        train_shuffle = False
-    else:
-        train_sampler = val_sampler = test_sampler = None
-        train_shuffle = True
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=train_shuffle,
-        sampler=train_sampler,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        sampler=val_sampler,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        sampler=test_sampler,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
+    # drop_last=True: avoids a final batch of size 1, which crashes nn.DataParallel on
+    # multi-GPU (a 1-sample batch cannot be split across GPUs -> NCCL broadcast error).
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     return train_loader, val_loader, test_loader

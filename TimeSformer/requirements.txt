@@ -1,0 +1,18 @@
+
+# --- Core Deep Learning ---
+torch>=2.0.0
+torchvision>=0.15.0
+
+# --- Hugging Face Ecosystem (TimeSformer & LoRA) ---
+transformers>=4.30.0
+peft>=0.5.0
+accelerate>=0.21.0        
+safetensors>=0.3.1       
+
+# --- Data & Metrics ---
+numpy>=1.21.0
+scikit-learn>=1.0.0       
+
+# --- Utilities ---
+tqdm>=4.64.0              
+PyYAML>=6.0               
