@@ -74,7 +74,7 @@ def apply_training_strategy(model, config):
         )
         model.backbone = get_peft_model(model.backbone, lora_config)
 
-        # CRITICAL: get_peft_model() freezes EVERY non-adapter weight, including the
+        # get_peft_model() freezes EVERY non-adapter weight, including the
         # input embeddings. Three input layers carry no usable pretrained signal for SITS
         # and must be allowed to adapt, otherwise the LoRA adapters learn on top of a
         # frozen, ill-initialised input — which is the true bottleneck of this transfer:
@@ -92,7 +92,7 @@ def apply_training_strategy(model, config):
         print(f"   ↳ Unfroze {len(unfrozen)} input-embedding tensors for domain adaptation.")
 
     elif config['model'].get('freeze_backbone', False):
-        print("Strategy: Linear Probing (Frozen Backbone)")
+        print("Strategy: Linear Probing (frozen backbone blocks, trainable input interface)")
         for param in model.backbone.parameters():
             param.requires_grad = False
         for param in model.decoder.parameters():
@@ -101,6 +101,13 @@ def apply_training_strategy(model, config):
             param.requires_grad = True
         for param in model.feature_fusion.parameters():
             param.requires_grad = True
+        # Keep the input interface trainable (same as the LoRA setup) for a FAIR comparison:
+        # the patch projection (RGB->10-band) and the re-initialised position/time embeddings
+        # carry no usable pretrained signal, so freezing them would cripple linear probing.
+        for name, param in model.backbone.named_parameters():
+            if any(k in name for k in ("patch_embeddings.projection",
+                                       "position_embeddings", "time_embeddings")):
+                param.requires_grad = True
 
     else:
         print("Strategy: Full Fine-Tuning (All weights are learning)")
@@ -218,14 +225,14 @@ def main():
     )
     model = apply_training_strategy(model, config)
 
-    # FIX: Enable DataParallel BEFORE moving to device
+    #  Enable DataParallel BEFORE moving to device
     if n_gpus > 1:
         print(f" {n_gpus} GPUs detected — enabling DataParallel")
         model = nn.DataParallel(model)
     model = model.to(device)
 
     # --- Optimizer & Scheduler ---
-    # FIX: Use get_base_model() to access parameters through DataParallel wrapper
+    # Use get_base_model() to access parameters through DataParallel wrapper
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, get_base_model(model).parameters()),
         lr=config['training']['learning_rate'],
@@ -341,7 +348,7 @@ def main():
         history["val_miou"].append(current_miou)
         history["val_f1"].append(current_f1)
 
-        # FIX: Use get_base_model() to save weights without DataParallel wrapper
+        # Use get_base_model() to save weights without DataParallel wrapper
         if current_miou > best_val_miou:
             best_val_miou = current_miou
             torch.save(

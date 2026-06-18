@@ -86,7 +86,7 @@ class SITS_TimeSformer(nn.Module):
         self.intermediate_layers = intermediate_layers
         self.high_res_decoder = high_res_decoder
         
-        print("📥 Importing pre-trained TimeSformer (Kinetics-400) with Hidden States Extraction...")
+        print(" Importing pre-trained TimeSformer (Kinetics-400) with Hidden States Extraction...")
         # 1. Load the pre-trained backbone
         self.backbone = TimesformerModel.from_pretrained(
             "facebook/timesformer-base-finetuned-k400", 
@@ -131,7 +131,7 @@ class SITS_TimeSformer(nn.Module):
 
         # 5. Spatial Decoder
         if high_res_decoder:
-            print("🔬 Using high-resolution progressive decoder (+ raw-input skip)")
+            print(" Using high-resolution progressive decoder (+ raw-input skip)")
             self.decoder = ProgressiveDecoder(self.hidden_dim, num_classes, in_channels, patch_size)
         else:
             self.decoder = nn.Sequential(
@@ -153,7 +153,6 @@ class SITS_TimeSformer(nn.Module):
         # the temporal axis: padded and cloudy frames are excluded there via key_padding_mask.
         outputs = self.backbone(pixel_values=x, output_hidden_states=True)
         
-        # --- CLAUDE'S MULTI-SCALE EXTRACTION ---
         # Extract layers (e.g., 4, 8, 12)
         selected = [outputs.hidden_states[i] for i in self.intermediate_layers]
         
@@ -169,7 +168,6 @@ class SITS_TimeSformer(nn.Module):
         grid_w = W // self.patch_size
         tokens = fused.view(B, T, grid_h, grid_w, self.hidden_dim)
         
-        # --- OUR TEMPORAL AGGREGATOR ---
         # Flatten spatially: [B * grid_h * grid_w, T, C]
         tokens_flat = tokens.permute(0, 2, 3, 1, 4).reshape(B * grid_h * grid_w, T, self.hidden_dim)
         

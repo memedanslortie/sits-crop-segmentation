@@ -1,12 +1,9 @@
 experiment:
-  name: "TimeSformer_HIRES_LORA"     # distinct name so it does NOT overwrite your TEST1 baseline
+  name: "TimeSformer_HIRES_LORA"    
   seed: 42
   run_fold: 1
 
 data:
-  # Kaggle mounts a dataset at /kaggle/input/<dataset-slug> — NOT /kaggle/input/datasets/<user>/<slug>.
-  # The "datasets/almanoff/..." form is the kaggle.com URL, not the container mount path.
-  # Verify with:  !ls /kaggle/input/    and    !ls /kaggle/input/pastis-dataset
   dataset_path: "/kaggle/input/pastis-dataset"
   max_seq_len: 60
   in_channels: 10
