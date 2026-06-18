@@ -115,7 +115,7 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
             del encoder_sd[k]
         if is_main(rank):
             log.info(f"[rank 0] Stripped {len(patch_embed_keys)} patch_embed keys from checkpoint.")
-    
+
     missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
     if is_main(rank) and (missing or unexpected):
         log.info(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
@@ -421,7 +421,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     _stp_patience = cfg["training"].get("stp_patience", 25) * _lora_mlt
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", patience=_lr_patience, factor=0.5,
+        optimizer, mode="min", patience=_lr_patience, factor=0.5,
     )
     scaler = GradScaler()
 
@@ -465,7 +465,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
 
         scheduler.step(val_loss)
 
-        improved = val_loss > best_val_loss
+        improved = val_loss < best_val_loss
         if improved:
             best_val_loss = val_loss
 
@@ -473,9 +473,9 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             log.info(
                 f"[Fold {cfg['run_fold']} | {epoch:03d}/{n_epochs}]  "
                 f"train loss={train_m['loss']:.4f} | "
-                f"val loss={val_m['loss']:.4f} | "
+                f"val loss={val_m['loss']:.4f}{'*' if improved else ' '} | "
                 f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
-                f"mIoU={val_m['mIoU']:.4f}{'*' if improved else ' '} | "
+                f"mIoU={val_m['mIoU']:.4f} | "
                 f"F1={val_m.get('Macro_F1', 0):.4f}  "
                 f"({time.perf_counter() - t0:.1f}s)"
             )
