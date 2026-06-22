@@ -54,7 +54,7 @@ def build_vjepa2_1_encoder(
             bias=old_proj.bias is not None,
         )
         with torch.no_grad():
-            nn.init.kaiming_normal_(new_proj.weight, mode="fan_out")
+            nn.init.kaiming_normal_(new_proj.weight, mode="fan_in")
             if pretrained:
                 new_proj.weight[:, :3].copy_(old_proj.weight)
             if old_proj.bias is not None:
