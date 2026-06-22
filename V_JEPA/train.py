@@ -46,6 +46,8 @@ def main() -> None:
 
     if args.dry_run:
         for i, exp in enumerate(experiments):
+            log_dir = Path(base_cfg.get("training", {}).get("log_dir", "./logs"))
+            log = setup_logger(0, log_dir=log_dir, run_name=exp.name)
             log.info(f"[{i+1}/{len(experiments)}] {exp.group} / {exp.name} \n")
         return
 
@@ -54,8 +56,7 @@ def main() -> None:
     try:
         for i, exp in enumerate(experiments):
             log_dir = Path(base_cfg.get("training", {}).get("log_dir", "./logs"))
-            setup_logger(rank, log_dir=log_dir, run_name=exp.name)
-            log = get_logger()
+            log = setup_logger(rank, log_dir=log_dir, run_name=exp.name)
             if rank == 0:
                 log.info(f"\n{'='*60}\n"
                          f"Experiment [{i+1}/{len(experiments)}]: {exp.name}\n"

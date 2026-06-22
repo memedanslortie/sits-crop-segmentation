@@ -11,18 +11,18 @@ ablation:
   cloud_drop_rate: 0.0
 
 model:
-  backbone: vjepa2_1_vit_giant_384
+  backbone: vjepa2_1_vit_large_384
 
 training:
   num_classes: 20
-  epochs: 100
-  batch_size: 16
+  epochs: 75
+  batch_size: 4
   img_size: 128
   hidden_dim: 512
-  lr: 1.0e-3
+  lr: 1.0e-2
   weight_decay: 1.0e-4
-  lr_patience: 15
-  stp_patience: 27
-  checkpoint_dir: "/kaggle/working/ckpt"
-  log_dir: "/kaggle/working/logs"
+  lr_patience: 3
+  stp_patience: 6
+  checkpoint_dir: /kaggle/working/SITS-Classification/data/ckpt
+  log_dir: "/kaggle/working/SITS-Classification/data/logs"
   class_weighting: true

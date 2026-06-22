@@ -35,35 +35,30 @@ def build_vjepa2_1_encoder(
         VJEPA_BASE_URL = os.getenv("VJEPA_BASE_URL", "https://dl.fbaipublicfiles.com/vjepa2")
         model_file = ARCH_NAME_MAP[model_name][-1]
         url = VJEPA_BASE_URL + f"/{model_file}.pt"
-        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu")
-
+        log.info("Start loading pretrained")
+        state_dict = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
         checkpoint_key = _CHECKPOINT_KEY_MAP[model_name]
         encoder_state_dict = _clean_backbone_key(state_dict[checkpoint_key])
-
-        # Load weights, ignoring size mismatches (pos_embed is handled by RoPE)
         encoder.load_state_dict(encoder_state_dict, strict=False)
-        # log.info("Loaded pretrained weights (ignoring size mismatches).")
-        if not is_rgb:
-            # Replace the first layer of the patch embedding to accept `in_chans`
-            # The patch_embed is a PatchEmbed3D module
-            old_patch_embed = encoder.patch_embed
-            new_patch_embed = nn.Conv3d(
-                in_channels=3 if is_rgb else 10,
-                out_channels=old_patch_embed.embed_dim,
-                kernel_size=old_patch_embed.kernel_size,
-                stride=old_patch_embed.stride,
-                padding=old_patch_embed.padding,
-                bias=old_patch_embed.bias is not None,
-            )
-            # Copy weights for the first 3 channels (if pretrained on 3 channels)
-            with torch.no_grad():
-                new_patch_embed.weight[:, :3] = old_patch_embed.weight
-                if old_patch_embed.bias is not None:
-                    new_patch_embed.bias.copy_(old_patch_embed.bias)
-                # Initialize remaining channels randomly
-                nn.init.kaiming_normal_(new_patch_embed.weight[:, 3:], mode="fan_out")
+        log.info("Loaded pretrained weights.")
 
-            # Replace the patch_embed
-            encoder.patch_embed = new_patch_embed
+    if not is_rgb:
+        log.info("Adapting 1st layer for 10 bands")
+        old_proj = encoder.patch_embed.proj
+        new_proj = nn.Conv3d(
+            in_channels=10,
+            out_channels=old_proj.out_channels,
+            kernel_size=old_proj.kernel_size,
+            stride=old_proj.stride,
+            padding=old_proj.padding,
+            bias=old_proj.bias is not None,
+        )
+        with torch.no_grad():
+            nn.init.kaiming_normal_(new_proj.weight, mode="fan_out")
+            if pretrained:
+                new_proj.weight[:, :3].copy_(old_proj.weight)
+            if old_proj.bias is not None:
+                new_proj.bias.copy_(old_proj.bias)
+        encoder.patch_embed.proj = new_proj
 
     return encoder

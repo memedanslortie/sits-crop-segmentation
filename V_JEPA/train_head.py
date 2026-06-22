@@ -56,8 +56,11 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
        then loads the cached state dict directly onto its own GPU
        with map_location=device.  Peak extra RAM = one state dict on CPU
        per rank (loaded and freed immediately), never two full GPU copies.
-    4. The patch-embed is replaced for multi-spectral input inside
-       build_vjepa2_1_encoder; we only need to load the base weights here.
+    4. patch_embed keys are stripped before loading because build_vjepa2_1_encoder
+       already initialises the 10-channel proj correctly (3 RGB channels
+       warm-started, remaining 7 kaiming-initialised). strict=False skips
+       missing/extra keys but still errors on size mismatches, so we must
+       remove them manually.
     """
     from vjepa2.src.hub.backbones import ARCH_NAME_MAP, _clean_backbone_key
 
@@ -83,12 +86,10 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         if not encoder_cache.exists():
             log.info(f"[rank 0] Ensuring checkpoint is cached: {url}")
-            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu")
-            
+            raw = torch.hub.load_state_dict_from_url(url, map_location="cpu", progress=False)
             encoder_sd = _clean_backbone_key(raw[checkpoint_key])
             torch.save(encoder_sd, encoder_cache)
             log.info(f"[rank 0] Encoder state dict cached to {encoder_cache}")
-            
             del raw
             del encoder_sd
             torch.cuda.empty_cache()
@@ -104,7 +105,17 @@ def load_encoder(cfg: dict, rank: int, device: torch.device) -> nn.Module:
     )
 
     encoder_sd = torch.load(encoder_cache, map_location=device)
-    
+
+    # Strip patch_embed keys: build_vjepa2_1_encoder already initialised the
+    # 10-channel proj correctly. strict=False does NOT skip size mismatches
+    # (only missing/extra keys), so we must remove them explicitly.
+    if not is_rgb:
+        patch_embed_keys = [k for k in encoder_sd if k.startswith("patch_embed")]
+        for k in patch_embed_keys:
+            del encoder_sd[k]
+        if is_main(rank):
+            log.info(f"[rank 0] Stripped {len(patch_embed_keys)} patch_embed keys from checkpoint.")
+
     missing, unexpected = encoder.load_state_dict(encoder_sd, strict=False)
     if is_main(rank) and (missing or unexpected):
         log.info(f"[rank 0] load_state_dict: {len(missing)} missing, {len(unexpected)} unexpected keys")
@@ -214,7 +225,7 @@ def _apply_lora(encoder: nn.Module, lora_cfg: dict) -> nn.Module:
         target_modules=["qkv", "proj"],
         lora_dropout=lora_cfg.get("dropout", 0.0),
         bias="none",
-        task_type="FEATURE_EXTRACTION",
+        # task_type="FEATURE_EXTRACTION",
     )
     encoder = get_peft_model(encoder, config)
     encoder.print_trainable_parameters()
@@ -410,7 +421,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     _stp_patience = cfg["training"].get("stp_patience", 25) * _lora_mlt
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", patience=_lr_patience, factor=0.5,
+        optimizer, mode="min", patience=_lr_patience, factor=0.5,
     )
     scaler = GradScaler()
 
@@ -419,7 +430,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     suffix = "lora" if lora_active else "frozen"
     best_ckpt = ckpt_dir / f"best_{suffix}_fold{cfg['run_fold']}.pt"
-    best_val_miou = -1.0
+    best_val_loss = float('inf') 
 
     # Training loop
     n_epochs: int = cfg["training"]["epochs"]
@@ -450,21 +461,26 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             evaluator=evaluator,
         )
 
-        val_miou = val_m["mIoU"]
+        val_loss_tensor = torch.tensor(val_m['loss'], device=device)
+        if dist.is_initialized():
+            dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
+            val_loss_tensor /= world_size
+        
+        val_loss = val_loss_tensor.item()
 
-        scheduler.step(val_miou)
+        scheduler.step(val_loss)
 
-        improved = val_miou > best_val_miou
+        improved = val_loss < best_val_loss
         if improved:
-            best_val_miou = val_miou
+            best_val_loss = val_loss
 
         if main:
             log.info(
                 f"[Fold {cfg['run_fold']} | {epoch:03d}/{n_epochs}]  "
                 f"train loss={train_m['loss']:.4f} | "
-                f"val loss={val_m['loss']:.4f} | "
+                f"val loss={val_loss:.4f}{'*' if improved else ' '} | "
                 f"OA={val_m.get('Overall_Accuracy', 0):.4f} | "
-                f"mIoU={val_miou:.4f}{'*' if improved else ' '} | "
+                f"mIoU={val_m['mIoU']:.4f} | "
                 f"F1={val_m.get('Macro_F1', 0):.4f}  "
                 f"({time.perf_counter() - t0:.1f}s)"
             )
@@ -480,14 +496,17 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
 
         # broadcast improved flag so early stopping is consistent
         improved_tensor = torch.tensor(int(improved), device=device)
-        dist.broadcast(improved_tensor, src=0)
+        if dist.is_initialized():
+            dist.broadcast(improved_tensor, src=0)
+            
         epochs_since_improve = 0 if improved_tensor.item() else epochs_since_improve + 1
 
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
 
         if epochs_since_improve >= _stp_patience:
             if main:
-                log.info(f"Early stopping: no mIoU improvement for {_stp_patience} epochs.")
+                log.info(f"Early stopping: no loss improvement for {_stp_patience} epochs.")
             break
 
     # Restore best weights
@@ -500,7 +519,7 @@ def train(cfg: dict, rank, world_size, device) -> nn.Module:
             log.info("LoRA weights merged into encoder.")
 
     if main:
-        log.info(f"Best val mIoU {best_val_miou:.4f} -> {best_ckpt}")
+        log.info(f"Best val loss {best_val_loss:.4f} -> {best_ckpt}")
 
     # cleanup_ddp()
     return best_ckpt
