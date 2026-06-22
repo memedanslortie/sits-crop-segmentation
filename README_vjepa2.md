@@ -19,9 +19,7 @@ The model ingests sequences of satellite patches capturing the phenological deve
 
 Below is a time-series representation of a sample patch in the visible RGB spectrum:
 
-<center>
 ![VIDEO](utils/docs/viss2_rgb.mp4)
-</center>
 
 ## 3. Architecture
 
@@ -61,9 +59,7 @@ As it was absolutly out of scope to fine tune the entier V-JEPA 2.1 backbone (mo
 ### E. Handling Class Imbalance
 
 The `label_counts` heavily skew towards "Background", "Meadow" and "Winter Wheat". `_compute_class_weights` performs a one-time scan of the dataset (executed by Rank 0 and cached) to generate inverse-frequency weights for the `CrossEntropyLoss`.
-<center>
 ![CLASS_IMBALANCE](utils/docs/class_imbalance.png)
-</center>
 
 ## 4. Experiment Orchestration
 
