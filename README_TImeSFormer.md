@@ -1,12 +1,3 @@
-<!--
-  Pour illustrer le rapport, dépose tes figures dans un dossier docs/ :
-    docs/qualitative.png   -> triptyques RGB | vérité terrain | prédiction (notebook qualitative_maps)
-    docs/attention.png     -> poids d'attention temporelle par date (masque = 0)
-    docs/ablation.png      -> (optionnel) barres décodeur simple vs HIRES
-  puis vérifie que les chemins ![...](docs/....png) ci-dessous pointent bien dessus.
-  Remplace les [À COMPLÉTER] par tes chiffres 5-fold quand ils sont prêts.
--->
-
 # 🛰️ Classification de séries temporelles d'images satellites — Méthode 1 : TimeSformer
 
 > **Mini-rapport de projet — Master 2.** Segmentation sémantique de séries temporelles
@@ -156,7 +147,7 @@ supprime les artefacts en blocs 16×16 de la baseline) ; les parcelles fines/rar
 bruitées — manifestation directe de la résolution sémantique 8×8.
 
 ### 5.6 Analyse de l'attention temporelle
-![Poids d'attention temporelle appris](docs/attention.png)
+![Poids d'attention temporelle appris](utils/docs/attention.png)
 
 Deux résultats **vérifiés empiriquement** : (1) les dates masquées reçoivent une attention
 **strictement nulle** (validation du mécanisme de masquage) ; (2) au sein d'une série,
